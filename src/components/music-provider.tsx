@@ -1,5 +1,5 @@
 import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
-import { candidates, winner, loadTracks, saveTrack, deleteTrack, vote, type Track, type Playlist, type Room, type Participant } from '@/lib/music';
+import { candidates, winner, vote, type Track, type Playlist, type Room, type Participant } from '@/lib/music';
 import { createLanPeer, decodeSignal, encodeSignal, parseLanMessage, toSharedTracks, waitForCandidates, type LanMessage, type SharedTrack } from '@/lib/lan';
 
 export type Membership = { role: 'host' | 'guest'; participantId: string; status: 'waiting' | 'connected' | 'disconnected'; answerCode?: string };
@@ -7,8 +7,78 @@ export type Invite = { id: string; roomId: string; code: string; status: 'waitin
 type HostConnection = { id: string; roomId: string; peer: RTCPeerConnection; channel: RTCDataChannel; participant?: Participant; closed: boolean };
 type GuestConnection = { roomId: string; name: string; peer: RTCPeerConnection; channel?: RTCDataChannel; participantId: string; closed: boolean };
 
+export type CloudTrack = Track & {
+  mediaUrl: string;
+  youtubeId: string | null;
+  coverUrl: string | null;
+  votes: number;
+};
+
+interface ApiSongRecord {
+  id: number | string;
+  title: string;
+  artist: string;
+  media_url: string;
+  youtube_id: string | null;
+  cover_url: string | null;
+  votes: number;
+  created_at: string;
+}
+
+interface YTPlayerInstance {
+  loadVideoById: (videoId: string) => void;
+  playVideo: () => void;
+  pauseVideo: () => void;
+  stopVideo: () => void;
+  seekTo: (seconds: number, allowSeekAhead: boolean) => void;
+  setVolume: (volume: number) => void;
+  getCurrentTime: () => number;
+  getDuration: () => number;
+  destroy: () => void;
+}
+
+declare global {
+  interface Window {
+    YT?: {
+      Player: new (
+        elementId: string,
+        options: {
+          height?: string | number;
+          width?: string | number;
+          videoId?: string;
+          playerVars?: Record<string, number | string>;
+          events?: {
+            onReady?: () => void;
+            onStateChange?: (event: { data: number }) => void;
+            onError?: () => void;
+          };
+        }
+      ) => YTPlayerInstance;
+    };
+    onYouTubeIframeAPIReady?: () => void;
+  }
+}
+
+function mapSongToTrack(song: ApiSongRecord): CloudTrack {
+  return {
+    id: String(song.id),
+    title: song.title || 'Música da Comunidade',
+    artist: song.artist || 'Votefy',
+    album: 'Comunidade Votefy',
+    filename: song.media_url,
+    duration: 0,
+    file: new File([], song.title || 'stream'),
+    cover: undefined,
+    added: song.created_at ? new Date(song.created_at).getTime() : Date.now(),
+    mediaUrl: song.media_url,
+    youtubeId: song.youtube_id,
+    coverUrl: song.cover_url,
+    votes: Number(song.votes) || 1,
+  };
+}
+
 function useMusicState() {
-  const [tracks, setTracks] = useState<Track[]>([]);
+  const [tracks, setTracks] = useState<CloudTrack[]>([]);
   const [playlists, setPlaylists] = useState<Playlist[]>([]);
   const [favorites, setFavorites] = useState<string[]>([]);
   const [rooms, setRooms] = useState<Room[]>([]);
@@ -28,19 +98,32 @@ function useMusicState() {
   const [activeRoom, setActiveRoom] = useState<string>();
   const [notice, setNotice] = useState('');
   const [importing, setImporting] = useState(false);
+
   const audio = useRef<HTMLAudioElement | null>(null);
-  const url = useRef<string | undefined>(undefined);
+  const ytPlayer = useRef<YTPlayerInstance | null>(null);
+  const ytReady = useRef(false);
+  const pendingYtId = useRef<string | null>(null);
   const playbackVersion = useRef(0);
-  const tracksRef = useRef<Track[]>([]);
+  const tracksRef = useRef<CloudTrack[]>([]);
+  const currentRef = useRef<string | undefined>(undefined);
+  const volumeRef = useRef(volume);
   const roomsRef = useRef<Room[]>([]);
   const membershipsRef = useRef<Record<string, Membership>>({});
   const hostConnections = useRef(new Map<string, HostConnection>());
   const guestConnection = useRef<GuestConnection | undefined>(undefined);
+  const onEndedRef = useRef<() => void>(() => {});
+
+  currentRef.current = current;
+  volumeRef.current = volume;
 
   const commitRooms = (next: Room[], broadcast = true) => {
     roomsRef.current = next;
     setRooms(next);
     if (broadcast) for (const room of next) if (membershipsRef.current[room.id]?.role === 'host') broadcastRoom(room.id);
+  };
+  const setRoomsCompat = (updater: Room[] | ((prev: Room[]) => Room[])) => {
+    const next = typeof updater === 'function' ? updater(roomsRef.current) : updater;
+    commitRooms(next);
   };
   const commitMemberships = (next: Record<string, Membership>) => {
     membershipsRef.current = next;
@@ -60,7 +143,6 @@ function useMusicState() {
     for (const connection of hostConnections.current.values()) if (connection.roomId === roomId && connection.participant) send(connection.channel, message);
   }
   const updateRoom = (id: string, change: (room: Room) => Room) => {
-    if (membershipsRef.current[id]?.role !== 'host') return;
     const room = roomsRef.current.find(item => item.id === id);
     if (!room) return;
     const changed = change(room);
@@ -100,6 +182,85 @@ function useMusicState() {
     if (message.type === 'leave') cleanupHostConnection(connection);
   };
 
+  // Carrega músicas salvas na Neon
+  const refreshTracks = async () => {
+    try {
+      const response = await fetch('/api/songs');
+      if (!response.ok) return;
+      const data = (await response.json()) as ApiSongRecord[];
+      if (Array.isArray(data)) {
+        const mapped = data.map(mapSongToTrack);
+        tracksRef.current = mapped;
+        setTracks(mapped);
+      }
+    } catch {
+      // Silencia falhas temporárias de rede no polling
+    }
+  };
+
+  // Inicializa YouTube IFrame API para streaming direto
+  useEffect(() => {
+    const createPlayer = () => {
+      if (!window.YT?.Player || ytPlayer.current || !document.getElementById('votefy-yt-player')) return;
+      ytPlayer.current = new window.YT.Player('votefy-yt-player', {
+        height: '124',
+        width: '220',
+        playerVars: {
+          autoplay: 1,
+          controls: 1,
+          rel: 0,
+          modestbranding: 1,
+          playsinline: 1,
+        },
+        events: {
+          onReady: () => {
+            ytReady.current = true;
+            ytPlayer.current?.setVolume(Math.round(volumeRef.current * 100));
+            if (pendingYtId.current) {
+              ytPlayer.current?.loadVideoById(pendingYtId.current);
+              pendingYtId.current = null;
+            }
+          },
+          onStateChange: (event) => {
+            if (event.data === 1) setPlaying(true);
+            if (event.data === 2) setPlaying(false);
+            if (event.data === 0) onEndedRef.current();
+          },
+          onError: () => {
+            setNotice('Este vídeo do YouTube bloqueou reprodução incorporada. Tente outro link.');
+            setPlaying(false);
+          },
+        },
+      });
+    };
+
+    if (window.YT?.Player) {
+      createPlayer();
+    } else {
+      window.onYouTubeIframeAPIReady = createPlayer;
+      if (!document.querySelector('script[src="https://www.youtube.com/iframe_api"]')) {
+        const tag = document.createElement('script');
+        tag.src = 'https://www.youtube.com/iframe_api';
+        document.body.appendChild(tag);
+      }
+    }
+  }, []);
+
+  // Atualiza barra de progresso durante streaming do YouTube
+  useEffect(() => {
+    const activeTrack = tracks.find(t => t.id === current);
+    if (!playing || !activeTrack?.youtubeId) return;
+    const timer = setInterval(() => {
+      if (ytPlayer.current && ytReady.current) {
+        const cur = ytPlayer.current.getCurrentTime();
+        const dur = ytPlayer.current.getDuration();
+        if (Number.isFinite(cur)) setElapsed(cur);
+        if (Number.isFinite(dur) && dur > 0) setDuration(dur);
+      }
+    }, 500);
+    return () => clearInterval(timer);
+  }, [playing, current, tracks]);
+
   useEffect(() => {
     audio.current = new Audio();
     const element = audio.current;
@@ -107,7 +268,8 @@ function useMusicState() {
     element.onloadedmetadata = () => setDuration(element.duration);
     element.onplay = () => setPlaying(true);
     element.onpause = () => setPlaying(false);
-    element.onerror = () => setNotice('Este arquivo não pode ser reproduzido neste navegador.');
+    element.onerror = () => setNotice('Este link de áudio não pôde ser reproduzido.');
+
     try {
       const state = JSON.parse(localStorage.getItem('onda-state') || '{}');
       setPlaylists(state.playlists || []);
@@ -115,41 +277,87 @@ function useMusicState() {
       setVolume(state.volume ?? .7);
       setShuffle(state.shuffle || false);
       setRepeat(state.repeat || false);
-    } catch { setNotice('Não foi possível recuperar as preferências salvas.'); }
-    loadTracks().then(loaded => { tracksRef.current = loaded; setTracks(loaded); }).catch(() => setNotice('Armazenamento indisponível. Verifique as permissões do navegador.')).finally(() => setReady(true));
+    } catch {
+      setNotice('Não foi possível recuperar as preferências salvas.');
+    }
+
+    refreshTracks().finally(() => setReady(true));
+    const syncInterval = setInterval(() => {
+      void refreshTracks();
+    }, 5000);
+
     return () => {
+      clearInterval(syncInterval);
       element.pause();
       element.src = '';
-      if (url.current) URL.revokeObjectURL(url.current);
       for (const connection of hostConnections.current.values()) { connection.closed = true; connection.peer.close(); }
       if (guestConnection.current) { guestConnection.current.closed = true; guestConnection.current.peer.close(); }
     };
   }, []);
-  useEffect(() => { if (ready) { try { localStorage.setItem('onda-state', JSON.stringify({ playlists, favorites, volume, shuffle, repeat })); } catch { setNotice('Não foi possível salvar. O armazenamento pode estar cheio.'); } } }, [ready, playlists, favorites, volume, shuffle, repeat]);
-  useEffect(() => { if (audio.current) audio.current.volume = volume; }, [volume]);
-  useEffect(() => { tracksRef.current = tracks; for (const room of roomsRef.current) broadcastRoom(room.id); }, [tracks]);
-  useEffect(() => { if (notice) { const timer = setTimeout(() => setNotice(''), 6500); return () => clearTimeout(timer); } return undefined; }, [notice]);
+
+  useEffect(() => {
+    if (ready) {
+      try {
+        localStorage.setItem('onda-state', JSON.stringify({ playlists, favorites, volume, shuffle, repeat }));
+      } catch {
+        setNotice('Não foi possível salvar preferências locais.');
+      }
+    }
+  }, [ready, playlists, favorites, volume, shuffle, repeat]);
+
+  useEffect(() => {
+    if (audio.current) audio.current.volume = volume;
+    if (ytPlayer.current && ytReady.current) ytPlayer.current.setVolume(Math.round(volume * 100));
+  }, [volume]);
+
+  useEffect(() => {
+    tracksRef.current = tracks;
+    for (const room of roomsRef.current) broadcastRoom(room.id);
+  }, [tracks]);
+
+  useEffect(() => {
+    if (notice) {
+      const timer = setTimeout(() => setNotice(''), 6500);
+      return () => clearTimeout(timer);
+    }
+    return undefined;
+  }, [notice]);
 
   const play = (id: string, ids?: string[], roomId?: string) => {
     const track = tracksRef.current.find(item => item.id === id);
-    const element = audio.current;
-    if (!track || !element || (roomId && membershipsRef.current[roomId]?.role !== 'host')) return;
+    if (!track) return;
     playbackVersion.current++;
     const version = playbackVersion.current;
-    if (url.current) URL.revokeObjectURL(url.current);
-    url.current = URL.createObjectURL(track.file);
-    element.src = url.current;
+
     setCurrent(id);
     setElapsed(0);
-    setDuration(track.duration);
+    setDuration(track.duration || 0);
     setActiveRoom(roomId);
     if (ids) setQueue(ids);
     if (roomId) updateRoom(roomId, room => ({ ...room, current: id, options: candidates(tracksRef.current.map(item => item.id), id), votes: {}, open: true }));
-    element.play().catch(error => { if (version === playbackVersion.current && error.name !== 'AbortError') setNotice('Reprodução indisponível. Tente outro formato de áudio.'); });
-    try { const history = JSON.parse(localStorage.getItem('onda-history') || '[]'); localStorage.setItem('onda-history', JSON.stringify([id, ...history].slice(0, 100))); } catch { /* History is optional. */ }
+
+    if (track.youtubeId) {
+      audio.current?.pause();
+      if (ytPlayer.current && ytReady.current) {
+        ytPlayer.current.loadVideoById(track.youtubeId);
+      } else {
+        pendingYtId.current = track.youtubeId;
+      }
+      setPlaying(true);
+    } else if (audio.current) {
+      if (ytPlayer.current && ytReady.current) {
+        try { ytPlayer.current.pauseVideo(); } catch { /* ignore */ }
+      }
+      audio.current.src = track.mediaUrl;
+      audio.current.play().catch(error => {
+        if (version === playbackVersion.current && error.name !== 'AbortError') {
+          setNotice('Reprodução indisponível para este link.');
+        }
+      });
+    }
   };
+
   const finishRound = (id: string, manual?: string) => {
-    if (membershipsRef.current[id]?.role !== 'host') return;
     const room = roomsRef.current.find(item => item.id === id);
     if (!room) return;
     const next = manual || room.queue.find(trackId => tracksRef.current.some(track => track.id === trackId)) || winner(room, tracksRef.current.map(track => track.id));
@@ -158,46 +366,131 @@ function useMusicState() {
     updateRoom(id, currentRoom => ({ ...currentRoom, history: [...currentRoom.history, { track: next, votes: count }], queue: currentRoom.queue.filter(trackId => trackId !== next), open: false }));
     play(next, undefined, id);
   };
+
   const skip = (direction = 1) => {
     if (activeRoom && direction === 1) { finishRound(activeRoom); return; }
-    const ids = (queue.length ? queue : tracks.map(track => track.id)).filter(id => tracks.some(track => track.id === id));
+    const ids = (queue.length ? queue : tracksRef.current.map(track => track.id)).filter(id => tracksRef.current.some(track => track.id === id));
     if (!ids.length) return;
-    const index = ids.indexOf(current || '');
+    const index = ids.indexOf(currentRef.current || '');
     const next = ids[shuffle ? Math.floor(Math.random() * ids.length) : (index + direction + ids.length) % ids.length];
     if (next) play(next, ids);
   };
-  useEffect(() => { if (audio.current) audio.current.onended = () => { if (activeRoom) finishRound(activeRoom); else if (repeat && audio.current) { audio.current.currentTime = 0; void audio.current.play(); } else skip(); }; });
-  const toggle = () => { if (!audio.current) return; if (!current) { if (tracks[0]) play(tracks[0].id); return; } if (playing) audio.current.pause(); else audio.current.play().catch(() => setNotice('Não foi possível reproduzir este arquivo.')); };
-  const seek = (value: number) => { if (audio.current && Number.isFinite(audio.current.duration)) { audio.current.currentTime = value; setElapsed(value); } };
-  const importFiles = async (files: File[]) => {
-    setImporting(true);
-    let added = 0;
-    let failed = 0;
-    for (const file of files) {
-      if (!file.type.startsWith('audio/') && !/\.(mp3|wav|ogg|flac|m4a|aac|opus|aiff|webm)$/i.test(file.name)) { failed++; continue; }
-      try {
-        const { parseBlob } = await import('music-metadata');
-        const metadata = await parseBlob(file).catch(() => undefined);
-        const picture = metadata?.common.picture?.[0];
-        const track: Track = { id: crypto.randomUUID(), title: metadata?.common.title || file.name.replace(/\.[^.]+$/, ''), artist: metadata?.common.artist || 'Artista desconhecido', album: metadata?.common.album || 'Músicas locais', filename: file.name, duration: metadata?.format.duration || 0, file, cover: picture ? new Blob([new Uint8Array(picture.data)], { type: picture.format }) : undefined, added: Date.now() };
-        await saveTrack(track);
-        setTracks(previous => [...previous, track]);
-        added++;
-      } catch { failed++; }
+
+  onEndedRef.current = () => {
+    const activeTrack = tracksRef.current.find(t => t.id === currentRef.current);
+    if (activeRoom) {
+      finishRound(activeRoom);
+    } else if (repeat) {
+      if (activeTrack?.youtubeId && ytPlayer.current && ytReady.current) {
+        ytPlayer.current.seekTo(0, true);
+        ytPlayer.current.playVideo();
+      } else if (audio.current) {
+        audio.current.currentTime = 0;
+        void audio.current.play();
+      }
+    } else {
+      skip();
     }
-    setImporting(false);
-    setNotice(`${added} música${added === 1 ? '' : 's'} adicionada${added === 1 ? '' : 's'}${failed ? ` · ${failed} arquivo(s) não importado(s)` : ''}.`);
   };
-  const removeTrack = async (id: string) => {
+
+  useEffect(() => {
+    if (audio.current) audio.current.onended = () => onEndedRef.current();
+  }, []);
+
+  const toggle = () => {
+    const activeTrack = tracksRef.current.find(t => t.id === currentRef.current);
+    if (!activeTrack) {
+      const first = tracksRef.current[0];
+      if (first) play(first.id);
+      return;
+    }
+    if (activeTrack.youtubeId && ytPlayer.current && ytReady.current) {
+      if (playing) ytPlayer.current.pauseVideo();
+      else ytPlayer.current.playVideo();
+      return;
+    }
+    if (!audio.current) return;
+    if (playing) audio.current.pause();
+    else audio.current.play().catch(() => setNotice('Não foi possível reproduzir este link.'));
+  };
+
+  const seek = (value: number) => {
+    const activeTrack = tracksRef.current.find(t => t.id === currentRef.current);
+    if (activeTrack?.youtubeId && ytPlayer.current && ytReady.current) {
+      ytPlayer.current.seekTo(value, true);
+      setElapsed(value);
+      return;
+    }
+    if (audio.current && Number.isFinite(audio.current.duration)) {
+      audio.current.currentTime = value;
+      setElapsed(value);
+    }
+  };
+
+  // Salva nova música por link na Neon para todos os usuários ouvirem
+  const addSongByUrl = async (mediaUrl: string, customTitle?: string) => {
+    setImporting(true);
     try {
-      await deleteTrack(id);
-      setTracks(all => all.filter(track => track.id !== id));
-      setFavorites(all => all.filter(trackId => trackId !== id));
-      setPlaylists(all => all.map(playlist => ({ ...playlist, tracks: playlist.tracks.filter(trackId => trackId !== id) })));
-      commitRooms(roomsRef.current.map(room => ({ ...room, options: room.options.filter(trackId => trackId !== id), queue: room.queue.filter(trackId => trackId !== id), votes: Object.fromEntries(Object.entries(room.votes).filter(([, trackId]) => trackId !== id)) })));
-      if (current === id) { audio.current?.pause(); setCurrent(undefined); }
-    } catch { setNotice('Não foi possível excluir a música.'); }
+      const response = await fetch('/api/songs', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ mediaUrl, title: customTitle }),
+      });
+
+      const payload = (await response.json()) as ApiSongRecord & { error?: string };
+      if (!response.ok) {
+        throw new Error(payload.error || 'Não foi possível salvar a música.');
+      }
+
+      const savedTrack = mapSongToTrack(payload);
+      setTracks(prev => [savedTrack, ...prev.filter(item => item.id !== savedTrack.id)]);
+      setNotice(`"${savedTrack.title}" salva na nuvem para todos ouvirem!`);
+      return savedTrack;
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : 'Erro ao salvar música na Neon.';
+      setNotice(msg);
+      throw error;
+    } finally {
+      setImporting(false);
+    }
   };
+
+  // Registra voto na Neon
+  const voteSong = async (id: string) => {
+    try {
+      const response = await fetch('/api/songs', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'vote', id: Number(id) }),
+      });
+      if (response.ok) {
+        const updated = (await response.json()) as ApiSongRecord;
+        setTracks(prev =>
+          prev
+            .map(t => (t.id === id ? { ...t, votes: Number(updated.votes) } : t))
+            .sort((a, b) => b.votes - a.votes)
+        );
+        setNotice('Voto registrado!');
+      }
+    } catch {
+      setNotice('Não foi possível registrar o voto agora.');
+    }
+  };
+
+  const removeTrack = async (id: string) => {
+    setTracks(all => all.filter(track => track.id !== id));
+    setFavorites(all => all.filter(trackId => trackId !== id));
+    setPlaylists(all => all.map(playlist => ({ ...playlist, tracks: playlist.tracks.filter(trackId => trackId !== id) })));
+    if (current === id) {
+      audio.current?.pause();
+      if (ytPlayer.current && ytReady.current) {
+        try { ytPlayer.current.stopVideo(); } catch { /* ignore */ }
+      }
+      setCurrent(undefined);
+      setPlaying(false);
+    }
+  };
+
   const favorite = (id: string) => setFavorites(all => all.includes(id) ? all.filter(trackId => trackId !== id) : [...all, id]);
 
   const createRoom = (name: string, hostName: string) => {
@@ -330,9 +623,64 @@ function useMusicState() {
     if (activeRoom === roomId) { audio.current?.pause(); setActiveRoom(undefined); }
   };
 
-  return { tracks, playlists, setPlaylists, favorites, favorite, rooms, memberships, remoteTracks, invites, creatingInvite, ready, current, playing, elapsed, duration, volume, setVolume, shuffle, setShuffle, repeat, setRepeat, play, toggle, skip, seek, importFiles, importing, notice, setNotice, removeTrack, activeRoom, setActiveRoom, finishRound, updateRoom, createRoom, createInvite, acceptAnswer, joinRoom, castVote, sendChat, removeParticipant, leaveRoom, closeRoom };
+  return {
+    tracks,
+    playlists,
+    setPlaylists,
+    favorites,
+    favorite,
+    rooms,
+    setRooms: setRoomsCompat,
+    memberships,
+    remoteTracks,
+    invites,
+    creatingInvite,
+    ready,
+    current,
+    playing,
+    elapsed,
+    duration,
+    volume,
+    setVolume,
+    shuffle,
+    setShuffle,
+    repeat,
+    setRepeat,
+    play,
+    toggle,
+    skip,
+    seek,
+    addSongByUrl,
+    voteSong,
+    refreshTracks,
+    importing,
+    notice,
+    setNotice,
+    removeTrack,
+    activeRoom,
+    setActiveRoom,
+    finishRound,
+    updateRoom,
+    createRoom,
+    createInvite,
+    acceptAnswer,
+    joinRoom,
+    castVote,
+    sendChat,
+    removeParticipant,
+    leaveRoom,
+    closeRoom,
+  };
 }
+
 type MusicState = ReturnType<typeof useMusicState>;
 const MusicContext = createContext<MusicState | null>(null);
-export function MusicProvider({ children }: { children: ReactNode }) { const state = useMusicState(); return <MusicContext.Provider value={state}>{children}</MusicContext.Provider>; }
-export function useMusic() { const state = useContext(MusicContext); if (!state) throw new Error('Music provider missing'); return state; }
+export function MusicProvider({ children }: { children: ReactNode }) {
+  const state = useMusicState();
+  return <MusicContext.Provider value={state}>{children}</MusicContext.Provider>;
+}
+export function useMusic() {
+  const state = useContext(MusicContext);
+  if (!state) throw new Error('Music provider missing');
+  return state;
+}

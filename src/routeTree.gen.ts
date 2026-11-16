@@ -15,10 +15,12 @@ import { Route as LibraryRouteImport } from './routes/library'
 import { Route as PlaylistsRouteImport } from './routes/playlists'
 import { Route as RoomsRouteImport } from './routes/rooms'
 import { Route as SearchRouteImport } from './routes/search'
+import { Route as ApiSongsRouteImport } from './routes/api.songs'
 import { Route as PlaylistsIndexRouteImport } from './routes/playlists.index'
 import { Route as PlaylistsPlaylistIdRouteImport } from './routes/playlists.$playlistId'
 import { Route as RoomsIndexRouteImport } from './routes/rooms.index'
 import { Route as RoomsRoomIdRouteImport } from './routes/rooms.$roomId'
+import { Route as ApiHealthDbRouteImport } from './routes/api.health.db'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
@@ -50,6 +52,11 @@ const SearchRoute = SearchRouteImport.update({
   path: '/search',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiSongsRoute = ApiSongsRouteImport.update({
+  id: '/api/songs',
+  path: '/api/songs',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const PlaylistsIndexRoute = PlaylistsIndexRouteImport.update({
   id: '/',
   path: '/',
@@ -70,6 +77,11 @@ const RoomsRoomIdRoute = RoomsRoomIdRouteImport.update({
   path: '/$roomId',
   getParentRoute: () => RoomsRoute,
 } as any)
+const ApiHealthDbRoute = ApiHealthDbRouteImport.update({
+  id: '/api/health/db',
+  path: '/api/health/db',
+  getParentRoute: () => rootRouteImport,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
@@ -78,20 +90,24 @@ export interface FileRoutesByFullPath {
   '/playlists': typeof PlaylistsRouteWithChildren
   '/rooms': typeof RoomsRouteWithChildren
   '/search': typeof SearchRoute
+  '/api/songs': typeof ApiSongsRoute
   '/playlists/$playlistId': typeof PlaylistsPlaylistIdRoute
   '/rooms/$roomId': typeof RoomsRoomIdRoute
   '/playlists/': typeof PlaylistsIndexRoute
   '/rooms/': typeof RoomsIndexRoute
+  '/api/health/db': typeof ApiHealthDbRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/favorites': typeof FavoritesRoute
   '/library': typeof LibraryRoute
   '/search': typeof SearchRoute
+  '/api/songs': typeof ApiSongsRoute
   '/playlists/$playlistId': typeof PlaylistsPlaylistIdRoute
   '/rooms/$roomId': typeof RoomsRoomIdRoute
   '/playlists': typeof PlaylistsIndexRoute
   '/rooms': typeof RoomsIndexRoute
+  '/api/health/db': typeof ApiHealthDbRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -101,10 +117,12 @@ export interface FileRoutesById {
   '/playlists': typeof PlaylistsRouteWithChildren
   '/rooms': typeof RoomsRouteWithChildren
   '/search': typeof SearchRoute
+  '/api/songs': typeof ApiSongsRoute
   '/playlists/$playlistId': typeof PlaylistsPlaylistIdRoute
   '/rooms/$roomId': typeof RoomsRoomIdRoute
   '/playlists/': typeof PlaylistsIndexRoute
   '/rooms/': typeof RoomsIndexRoute
+  '/api/health/db': typeof ApiHealthDbRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -115,20 +133,24 @@ export interface FileRouteTypes {
     | '/playlists'
     | '/rooms'
     | '/search'
+    | '/api/songs'
     | '/playlists/$playlistId'
     | '/rooms/$roomId'
     | '/playlists/'
     | '/rooms/'
+    | '/api/health/db'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
     | '/favorites'
     | '/library'
     | '/search'
+    | '/api/songs'
     | '/playlists/$playlistId'
     | '/rooms/$roomId'
     | '/playlists'
     | '/rooms'
+    | '/api/health/db'
   id:
     | '__root__'
     | '/'
@@ -137,10 +159,12 @@ export interface FileRouteTypes {
     | '/playlists'
     | '/rooms'
     | '/search'
+    | '/api/songs'
     | '/playlists/$playlistId'
     | '/rooms/$roomId'
     | '/playlists/'
     | '/rooms/'
+    | '/api/health/db'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -150,6 +174,8 @@ export interface RootRouteChildren {
   PlaylistsRoute: typeof PlaylistsRouteWithChildren
   RoomsRoute: typeof RoomsRouteWithChildren
   SearchRoute: typeof SearchRoute
+  ApiSongsRoute: typeof ApiSongsRoute
+  ApiHealthDbRoute: typeof ApiHealthDbRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -196,6 +222,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof SearchRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/songs': {
+      id: '/api/songs'
+      path: '/api/songs'
+      fullPath: '/api/songs'
+      preLoaderRoute: typeof ApiSongsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/playlists/': {
       id: '/playlists/'
       path: '/'
@@ -223,6 +256,13 @@ declare module '@tanstack/react-router' {
       fullPath: '/rooms/$roomId'
       preLoaderRoute: typeof RoomsRoomIdRouteImport
       parentRoute: typeof RoomsRoute
+    }
+    '/api/health/db': {
+      id: '/api/health/db'
+      path: '/api/health/db'
+      fullPath: '/api/health/db'
+      preLoaderRoute: typeof ApiHealthDbRouteImport
+      parentRoute: typeof rootRouteImport
     }
   }
 }
@@ -260,6 +300,8 @@ const rootRouteChildren: RootRouteChildren = {
   PlaylistsRoute: PlaylistsRouteWithChildren,
   RoomsRoute: RoomsRouteWithChildren,
   SearchRoute: SearchRoute,
+  ApiSongsRoute: ApiSongsRoute,
+  ApiHealthDbRoute: ApiHealthDbRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
