@@ -10,33 +10,146 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as FavoritesRouteImport } from './routes/favorites'
+import { Route as LibraryRouteImport } from './routes/library'
+import { Route as PlaylistsRouteImport } from './routes/playlists'
+import { Route as RoomsRouteImport } from './routes/rooms'
+import { Route as SearchRouteImport } from './routes/search'
+import { Route as PlaylistsIndexRouteImport } from './routes/playlists.index'
+import { Route as PlaylistsPlaylistIdRouteImport } from './routes/playlists.$playlistId'
+import { Route as RoomsIndexRouteImport } from './routes/rooms.index'
+import { Route as RoomsRoomIdRouteImport } from './routes/rooms.$roomId'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
   getParentRoute: () => rootRouteImport,
 } as any)
+const FavoritesRoute = FavoritesRouteImport.update({
+  id: '/favorites',
+  path: '/favorites',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const LibraryRoute = LibraryRouteImport.update({
+  id: '/library',
+  path: '/library',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const PlaylistsRoute = PlaylistsRouteImport.update({
+  id: '/playlists',
+  path: '/playlists',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const RoomsRoute = RoomsRouteImport.update({
+  id: '/rooms',
+  path: '/rooms',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const SearchRoute = SearchRouteImport.update({
+  id: '/search',
+  path: '/search',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const PlaylistsIndexRoute = PlaylistsIndexRouteImport.update({
+  id: '/',
+  path: '/',
+  getParentRoute: () => PlaylistsRoute,
+} as any)
+const PlaylistsPlaylistIdRoute = PlaylistsPlaylistIdRouteImport.update({
+  id: '/$playlistId',
+  path: '/$playlistId',
+  getParentRoute: () => PlaylistsRoute,
+} as any)
+const RoomsIndexRoute = RoomsIndexRouteImport.update({
+  id: '/',
+  path: '/',
+  getParentRoute: () => RoomsRoute,
+} as any)
+const RoomsRoomIdRoute = RoomsRoomIdRouteImport.update({
+  id: '/$roomId',
+  path: '/$roomId',
+  getParentRoute: () => RoomsRoute,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
+  '/favorites': typeof FavoritesRoute
+  '/library': typeof LibraryRoute
+  '/playlists': typeof PlaylistsRouteWithChildren
+  '/rooms': typeof RoomsRouteWithChildren
+  '/search': typeof SearchRoute
+  '/playlists/$playlistId': typeof PlaylistsPlaylistIdRoute
+  '/rooms/$roomId': typeof RoomsRoomIdRoute
+  '/playlists/': typeof PlaylistsIndexRoute
+  '/rooms/': typeof RoomsIndexRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/favorites': typeof FavoritesRoute
+  '/library': typeof LibraryRoute
+  '/search': typeof SearchRoute
+  '/playlists/$playlistId': typeof PlaylistsPlaylistIdRoute
+  '/rooms/$roomId': typeof RoomsRoomIdRoute
+  '/playlists': typeof PlaylistsIndexRoute
+  '/rooms': typeof RoomsIndexRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
+  '/favorites': typeof FavoritesRoute
+  '/library': typeof LibraryRoute
+  '/playlists': typeof PlaylistsRouteWithChildren
+  '/rooms': typeof RoomsRouteWithChildren
+  '/search': typeof SearchRoute
+  '/playlists/$playlistId': typeof PlaylistsPlaylistIdRoute
+  '/rooms/$roomId': typeof RoomsRoomIdRoute
+  '/playlists/': typeof PlaylistsIndexRoute
+  '/rooms/': typeof RoomsIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/'
+  fullPaths:
+    | '/'
+    | '/favorites'
+    | '/library'
+    | '/playlists'
+    | '/rooms'
+    | '/search'
+    | '/playlists/$playlistId'
+    | '/rooms/$roomId'
+    | '/playlists/'
+    | '/rooms/'
   fileRoutesByTo: FileRoutesByTo
-  to: '/'
-  id: '__root__' | '/'
+  to:
+    | '/'
+    | '/favorites'
+    | '/library'
+    | '/search'
+    | '/playlists/$playlistId'
+    | '/rooms/$roomId'
+    | '/playlists'
+    | '/rooms'
+  id:
+    | '__root__'
+    | '/'
+    | '/favorites'
+    | '/library'
+    | '/playlists'
+    | '/rooms'
+    | '/search'
+    | '/playlists/$playlistId'
+    | '/rooms/$roomId'
+    | '/playlists/'
+    | '/rooms/'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
+  FavoritesRoute: typeof FavoritesRoute
+  LibraryRoute: typeof LibraryRoute
+  PlaylistsRoute: typeof PlaylistsRouteWithChildren
+  RoomsRoute: typeof RoomsRouteWithChildren
+  SearchRoute: typeof SearchRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -48,11 +161,105 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/favorites': {
+      id: '/favorites'
+      path: '/favorites'
+      fullPath: '/favorites'
+      preLoaderRoute: typeof FavoritesRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/library': {
+      id: '/library'
+      path: '/library'
+      fullPath: '/library'
+      preLoaderRoute: typeof LibraryRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/playlists': {
+      id: '/playlists'
+      path: '/playlists'
+      fullPath: '/playlists'
+      preLoaderRoute: typeof PlaylistsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/rooms': {
+      id: '/rooms'
+      path: '/rooms'
+      fullPath: '/rooms'
+      preLoaderRoute: typeof RoomsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/search': {
+      id: '/search'
+      path: '/search'
+      fullPath: '/search'
+      preLoaderRoute: typeof SearchRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/playlists/': {
+      id: '/playlists/'
+      path: '/'
+      fullPath: '/playlists/'
+      preLoaderRoute: typeof PlaylistsIndexRouteImport
+      parentRoute: typeof PlaylistsRoute
+    }
+    '/playlists/$playlistId': {
+      id: '/playlists/$playlistId'
+      path: '/$playlistId'
+      fullPath: '/playlists/$playlistId'
+      preLoaderRoute: typeof PlaylistsPlaylistIdRouteImport
+      parentRoute: typeof PlaylistsRoute
+    }
+    '/rooms/': {
+      id: '/rooms/'
+      path: '/'
+      fullPath: '/rooms/'
+      preLoaderRoute: typeof RoomsIndexRouteImport
+      parentRoute: typeof RoomsRoute
+    }
+    '/rooms/$roomId': {
+      id: '/rooms/$roomId'
+      path: '/$roomId'
+      fullPath: '/rooms/$roomId'
+      preLoaderRoute: typeof RoomsRoomIdRouteImport
+      parentRoute: typeof RoomsRoute
+    }
   }
 }
 
+interface PlaylistsRouteChildren {
+  PlaylistsPlaylistIdRoute: typeof PlaylistsPlaylistIdRoute
+  PlaylistsIndexRoute: typeof PlaylistsIndexRoute
+}
+
+const PlaylistsRouteChildren: PlaylistsRouteChildren = {
+  PlaylistsPlaylistIdRoute: PlaylistsPlaylistIdRoute,
+  PlaylistsIndexRoute: PlaylistsIndexRoute,
+}
+
+const PlaylistsRouteWithChildren = PlaylistsRoute._addFileChildren(
+  PlaylistsRouteChildren,
+)
+
+interface RoomsRouteChildren {
+  RoomsRoomIdRoute: typeof RoomsRoomIdRoute
+  RoomsIndexRoute: typeof RoomsIndexRoute
+}
+
+const RoomsRouteChildren: RoomsRouteChildren = {
+  RoomsRoomIdRoute: RoomsRoomIdRoute,
+  RoomsIndexRoute: RoomsIndexRoute,
+}
+
+const RoomsRouteWithChildren = RoomsRoute._addFileChildren(RoomsRouteChildren)
+
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
+  FavoritesRoute: FavoritesRoute,
+  LibraryRoute: LibraryRoute,
+  PlaylistsRoute: PlaylistsRouteWithChildren,
+  RoomsRoute: RoomsRouteWithChildren,
+  SearchRoute: SearchRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

@@ -28,3 +28,8 @@ use the editor.
   own key and store it in Secrets.
 - **Secrets.** Lovable manages them. Do not put secret values in the repo.
 <!-- LOVABLE:END -->
+
+## Application architecture
+- Keep the music state and HTML Audio instance in a root-level React provider so playback survives route navigation.
+- Store imported blobs and metadata in IndexedDB, and lightweight user state in localStorage; this application intentionally has no backend.
+- Put pure voting rules in a shared browser-safe module and test them independently to preserve local simulation integrity.
