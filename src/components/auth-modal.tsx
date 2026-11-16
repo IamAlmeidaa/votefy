@@ -1,11 +1,12 @@
 import { useState } from 'react';
-import { Link, useNavigate } from '@tanstack/react-router';
-import { ArrowLeft, LogIn, LogOut, Radio, ShieldCheck, User, UserPlus } from 'lucide-react';
+import { Link } from '@tanstack/react-router';
+import { LogIn, LogOut, Radio, ShieldCheck, User, UserPlus } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/components/ui/dialog';
 import { useMusic } from '@/components/music-provider';
-import { ProfilePage } from '@/components/profile-page';
+import { HomePage } from '@/components/music-app';
+import { HomePage } from '@/components/music-app';
 
 export function AuthForm({
   initialMode = 'login',
@@ -183,16 +184,12 @@ export function AuthButton() {
 
 export function LoginPage() {
   const m = useMusic();
-  const nav = useNavigate();
-
-  if (m.currentUser) return <ProfilePage />;
+  if (m.currentUser) return <HomePage />;
 
   return (
     <main className="auth-page">
       <div className="auth-page-top">
-        <Link className="auth-back" to="/">
-          <ArrowLeft size={16} /> Voltar ao Votefy
-        </Link>
+        <span />
         <Link className="auth-brand" to="/" aria-label="Votefy início">
           <span className="brand-mark" aria-hidden="true"><i /><i /><i /><i /></span>
           Votefy
@@ -207,10 +204,41 @@ export function LoginPage() {
           <p>Entre para votar, criar salas e curtir música junto com todo mundo.</p>
         </div>
 
-        <AuthForm onSuccess={() => void nav({ to: '/' })} />
+        <AuthForm />
         <p className="auth-privacy"><ShieldCheck size={14} /> Acesso protegido em conexão segura</p>
       </section>
 
+      <p className="auth-footer">Votefy <span>·</span> Música é melhor quando compartilhada.</p>
+    </main>
+  );
+}
+
+export function EntryPage() {
+  const m = useMusic();
+  if (!m.ready) {
+    return <main className="auth-page"><div className="auth-brand" aria-label="Votefy"><span className="brand-mark" aria-hidden="true"><i /><i /><i /><i /></span>Votefy</div><div className="auth-loading" role="status">Carregando sua conta…</div></main>;
+  }
+  if (m.currentUser) return <HomePage />;
+
+  return (
+    <main className="auth-page">
+      <div className="auth-page-top">
+        <span />
+        <Link className="auth-brand" to="/" aria-label="Votefy início">
+          <span className="brand-mark" aria-hidden="true"><i /><i /><i /><i /></span>
+          Votefy
+        </Link>
+      </div>
+      <section className="auth-card" aria-labelledby="auth-title">
+        <div className="auth-card-heading">
+          <span className="auth-icon"><Radio size={21} /></span>
+          <span className="eyebrow">Sua comunidade musical</span>
+          <h1 id="auth-title">Sua música. Sua conta.</h1>
+          <p>Entre para votar, criar salas e curtir música junto com todo mundo.</p>
+        </div>
+        <AuthForm />
+        <p className="auth-privacy"><ShieldCheck size={14} /> Acesso protegido em conexão segura</p>
+      </section>
       <p className="auth-footer">Votefy <span>·</span> Música é melhor quando compartilhada.</p>
     </main>
   );

@@ -7,7 +7,7 @@ import { Dialog, DialogContent, DialogTitle, DialogDescription } from '@/compone
 import { useMusic, type CloudTrack } from './music-provider';
 import { Artwork } from './artwork';
 import { candidates, vote, time, type Room } from '@/lib/music';
-import { AuthButton } from '@/components/auth-modal';
+import { AuthButton, EntryPage } from '@/components/auth-modal';
 import hero from '@/assets/music-cover.jpg';
 
 export function IconButton({ label, children, onClick, active, disabled, className = '' }: { label: string; children: ReactNode; onClick?: () => void; active?: boolean; disabled?: boolean; className?: string }) {
@@ -33,6 +33,10 @@ export function MusicShell({ children }: { children: ReactNode }) {
   const m = useMusic();
   const nav = useNavigate();
   const path = useRouterState({ select: s => s.location.pathname });
+  if (path === '/') {
+    if (!m.ready || !m.currentUser) return <EntryPage />;
+    return <div className="app-shell">{children}</div>;
+  }
   const [mobile, setMobile] = useState(false);
   const [query, setQuery] = useState('');
   const [queueOpen, setQueueOpen] = useState(false);
