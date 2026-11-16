@@ -1,5 +1,11 @@
 import { createFileRoute } from "@tanstack/react-router";
 
+function readSessionCookie(cookieHeader: string | null): string | null {
+  const value = cookieHeader?.split(";").map(part => part.trim()).find(part => part.startsWith("votefy_session="))?.slice("votefy_session=".length);
+  if (!value) return null;
+  try { return decodeURIComponent(value); } catch { return null; }
+}
+
 export const Route = createFileRoute("/api/songs")({
   server: {
     handlers: {
@@ -21,6 +27,8 @@ export const Route = createFileRoute("/api/songs")({
       // Salva uma nova música ou registra um voto
       POST: async ({ request }) => {
         try {
+          const origin = request.headers.get("origin");
+          if (!origin || origin !== new URL(request.url).origin) return Response.json({ error: "SolicitaÃ§Ã£o invÃ¡lida." }, { status: 403 });
           const body = (await request.json()) as {
             action?: string;
             id?: number | string;
@@ -28,7 +36,7 @@ export const Route = createFileRoute("/api/songs")({
             title?: string;
           };
 
-          const { createSong, incrementSongVote } = await import(
+          const { createSong, incrementSongVote, getAuthSession, recordSongMissionProgress } = await import(
             "@/lib/neon-database.server"
           );
 
@@ -47,6 +55,8 @@ export const Route = createFileRoute("/api/songs")({
           }
 
           const newSong = await createSong(body.mediaUrl.trim(), body.title);
+          const user = await getAuthSession(readSessionCookie(request.headers.get("cookie")));
+          if (user) await recordSongMissionProgress(user.id);
           return Response.json(newSong, { status: 201 });
         } catch (error) {
           console.error("Erro ao processar requisição em /api/songs:", error);

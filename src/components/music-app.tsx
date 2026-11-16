@@ -1,12 +1,13 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import { Link, useNavigate, useRouterState } from '@tanstack/react-router';
-import { Home, Search, Library, Heart, ListMusic, Radio, Plus, Link2, ChevronLeft, ChevronRight, Play, Pause, SkipBack, SkipForward, Shuffle, Repeat, Volume2, VolumeX, Music2, ArrowUpRight, MoreHorizontal, Menu, X, Trash2, Send, Users, Check, Headphones, Globe, Clock, LogOut, ThumbsUp } from 'lucide-react';
+import { Home, Search, Library, Heart, ListMusic, Radio, Plus, Link2, ChevronLeft, ChevronRight, Play, Pause, SkipBack, SkipForward, Shuffle, Repeat, Volume2, VolumeX, Music2, ArrowUpRight, MoreHorizontal, Menu, X, Trash2, Send, Users, Check, Headphones, Globe, Clock, LogOut, ThumbsUp, UserRound } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Dialog, DialogContent, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { useMusic, type CloudTrack } from './music-provider';
 import { Artwork } from './artwork';
 import { candidates, vote, time, type Room } from '@/lib/music';
+import { AuthButton } from '@/components/auth-modal';
 import hero from '@/assets/music-cover.jpg';
 
 export function IconButton({ label, children, onClick, active, disabled, className = '' }: { label: string; children: ReactNode; onClick?: () => void; active?: boolean; disabled?: boolean; className?: string }) {
@@ -130,7 +131,11 @@ export function MusicShell({ children }: { children: ReactNode }) {
           <Button variant="outline" className="upload-top" size="sm" onClick={() => setAddOpen(true)}>
             <Link2/>Adicionar link
           </Button>
-          <span className="avatar" title="Comunidade Votefy">VF</span>
+          {m.currentUser ? (
+            <Link to="/login" className="profile-top-link" aria-label="Abrir meu perfil">
+              <UserRound size={15} /> Perfil
+            </Link>
+          ) : <AuthButton />}
         </div>
       </header>
 

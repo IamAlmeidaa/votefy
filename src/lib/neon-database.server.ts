@@ -1,6 +1,9 @@
 import { env } from "node:process";
+import { Buffer } from "node:buffer";
 import { neon } from "@neondatabase/serverless";
-import { randomBytes, scryptSync, timingSafeEqual } from "node:crypto";
+import { createHash, randomBytes, scrypt, timingSafeEqual } from "node:crypto";
+import { isIP } from "node:net";
+import { promisify } from "node:util";
 import type { Room, RoomVote } from "@/lib/music";
 
 export async function checkNeonDatabase() {
@@ -717,7 +720,69 @@ export interface AuthUser {
   created_at: string;
 }
 
+export interface UserProfile {
+  id: string;
+  username: string;
+  nickname: string;
+  profile_picture: string;
+  caption: string;
+  bio: string;
+  background: string;
+  border_color: string;
+  achievements: string[];
+  listened_minutes: number;
+  orbs: number;
+  equipped_decoration: string | null;
+  missions: ProfileMission[];
+  mission_resets_at: string;
+  decorations: ProfileDecoration[];
+  owned_decorations: string[];
+}
+
+export interface ProfileMission {
+  id: string;
+  title: string;
+  description: string;
+  kind: "songs" | "listening";
+  target: number;
+  progress: number;
+  reward: number;
+  completed: boolean;
+}
+
+export interface ProfileDecoration {
+  id: string;
+  name: string;
+  description: string;
+  cost: number;
+  style: string;
+}
+
+export type ProfileImageKind = "avatar" | "banner";
+
+const PROFILE_DECORATIONS: ProfileDecoration[] = [
+  { id: "signal-frame", name: "Moldura Sinal", description: "Um contorno de neon para seu avatar.", cost: 60, style: "signal" },
+  { id: "aurora-frame", name: "Aurora", description: "Brilho ciano com movimento suave.", cost: 120, style: "aurora" },
+  { id: "vinyl-frame", name: "Disco de Ouro", description: "Um aro dourado para quem vive a música.", cost: 220, style: "vinyl" },
+  { id: "starlight-frame", name: "Chuva de Estrelas", description: "Pontos de luz em volta do perfil.", cost: 360, style: "starlight" },
+  { id: "spectrum-frame", name: "Espectro", description: "Um arco-íris de áudio em loop.", cost: 520, style: "spectrum" },
+];
+
+const PROFILE_MISSION_CATALOG = [
+  { id: "song-1", title: "Primeiro lançamento", description: "Adicione 1 música à biblioteca.", kind: "songs" as const, target: 1, reward: 15 },
+  { id: "song-2", title: "Dois lados do disco", description: "Adicione 2 músicas à biblioteca.", kind: "songs" as const, target: 2, reward: 25 },
+  { id: "song-3", title: "Trio em sintonia", description: "Adicione 3 músicas à biblioteca.", kind: "songs" as const, target: 3, reward: 35 },
+  { id: "song-5", title: "Curador musical", description: "Adicione 5 músicas à biblioteca.", kind: "songs" as const, target: 5, reward: 55 },
+  { id: "song-8", title: "Festival particular", description: "Adicione 8 músicas à biblioteca.", kind: "songs" as const, target: 8, reward: 80 },
+  { id: "listen-10", title: "Aquecimento", description: "Ouça música por 10 minutos.", kind: "listening" as const, target: 10, reward: 15 },
+  { id: "listen-20", title: "Entrou no ritmo", description: "Ouça música por 20 minutos.", kind: "listening" as const, target: 20, reward: 25 },
+  { id: "listen-30", title: "Lado A completo", description: "Ouça música por 30 minutos.", kind: "listening" as const, target: 30, reward: 35 },
+  { id: "listen-45", title: "Sessão estendida", description: "Ouça música por 45 minutos.", kind: "listening" as const, target: 45, reward: 50 },
+  { id: "listen-60", title: "Uma hora de som", description: "Ouça música por 60 minutos.", kind: "listening" as const, target: 60, reward: 70 },
+];
+
 let usersSchemaPromise: Promise<void> | null = null;
+const scryptAsync = promisify(scrypt);
 
 async function ensureUsersSchema() {
   if (!usersSchemaPromise) {
@@ -728,12 +793,90 @@ async function ensureUsersSchema() {
           id TEXT PRIMARY KEY,
           username TEXT NOT NULL,
           password_hash TEXT NOT NULL,
+          nickname TEXT,
+          profile_picture TEXT,
+          caption TEXT,
+          bio TEXT,
+          background TEXT,
+          border_color TEXT NOT NULL DEFAULT '#e74646',
+          achievements JSONB NOT NULL DEFAULT '[]'::jsonb,
+          listened_minutes INTEGER NOT NULL DEFAULT 0,
+          last_listened_at TIMESTAMPTZ,
+          orbs INTEGER NOT NULL DEFAULT 0,
+          equipped_decoration TEXT,
+          profile_picture_data BYTEA,
+          profile_picture_mime TEXT,
+          profile_picture_version INTEGER NOT NULL DEFAULT 0,
+          banner_data BYTEA,
+          banner_mime TEXT,
+          banner_version INTEGER NOT NULL DEFAULT 0,
           created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
         )
       `;
+      await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS nickname TEXT`;
+      await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS profile_picture TEXT`;
+      await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS caption TEXT`;
+      await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS bio TEXT`;
+      await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS background TEXT`;
+      await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS border_color TEXT NOT NULL DEFAULT '#e74646'`;
+      await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS achievements JSONB NOT NULL DEFAULT '[]'::jsonb`;
+      await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS listened_minutes INTEGER NOT NULL DEFAULT 0`;
+      await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS last_listened_at TIMESTAMPTZ`;
+      await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS orbs INTEGER NOT NULL DEFAULT 0`;
+      await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS equipped_decoration TEXT`;
+      await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS profile_picture_data BYTEA`;
+      await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS profile_picture_mime TEXT`;
+      await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS profile_picture_version INTEGER NOT NULL DEFAULT 0`;
+      await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS banner_data BYTEA`;
+      await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS banner_mime TEXT`;
+      await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS banner_version INTEGER NOT NULL DEFAULT 0`;
       await sql`
         CREATE UNIQUE INDEX IF NOT EXISTS users_username_lower_idx
           ON users (LOWER(username))
+      `;
+      await sql`
+        CREATE TABLE IF NOT EXISTS auth_sessions (
+          token_hash TEXT PRIMARY KEY,
+          user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+          expires_at TIMESTAMPTZ NOT NULL,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )
+      `;
+      await sql`CREATE INDEX IF NOT EXISTS auth_sessions_expiry_idx ON auth_sessions (expires_at)`;
+      await sql`
+        CREATE TABLE IF NOT EXISTS user_mission_cycles (
+          user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+          cycle_id BIGINT NOT NULL,
+          songs_added INTEGER NOT NULL DEFAULT 0,
+          listened_minutes INTEGER NOT NULL DEFAULT 0,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          PRIMARY KEY (user_id, cycle_id)
+        )
+      `;
+      await sql`
+        CREATE TABLE IF NOT EXISTS user_mission_tasks (
+          user_id TEXT NOT NULL,
+          cycle_id BIGINT NOT NULL,
+          mission_id TEXT NOT NULL,
+          title TEXT NOT NULL,
+          description TEXT NOT NULL,
+          kind TEXT NOT NULL CHECK (kind IN ('songs', 'listening')),
+          target INTEGER NOT NULL,
+          progress INTEGER NOT NULL DEFAULT 0,
+          reward INTEGER NOT NULL,
+          completed_at TIMESTAMPTZ,
+          reward_claimed BOOLEAN NOT NULL DEFAULT FALSE,
+          PRIMARY KEY (user_id, cycle_id, mission_id),
+          FOREIGN KEY (user_id, cycle_id) REFERENCES user_mission_cycles(user_id, cycle_id) ON DELETE CASCADE
+        )
+      `;
+      await sql`
+        CREATE TABLE IF NOT EXISTS user_profile_decorations (
+          user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+          decoration_id TEXT NOT NULL,
+          unlocked_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          PRIMARY KEY (user_id, decoration_id)
+        )
       `;
     })().catch(err => {
       usersSchemaPromise = null;
@@ -743,19 +886,19 @@ async function ensureUsersSchema() {
   await usersSchemaPromise;
 }
 
-function hashPassword(password: string): string {
-  const salt = randomBytes(16).toString("hex");
-  const hash = scryptSync(password, salt, 64).toString("hex");
-  return `${salt}:${hash}`;
-}
-
-function verifyPassword(password: string, stored: string): boolean {
+async function verifyPassword(password: string, stored: string): Promise<boolean> {
   const [salt, key] = stored.split(":");
   if (!salt || !key) return false;
-  const hashBuffer = scryptSync(password, salt, 64);
+  const hashBuffer = (await scryptAsync(password, salt, 64)) as Buffer;
   const keyBuffer = Buffer.from(key, "hex");
   if (hashBuffer.length !== keyBuffer.length) return false;
   return timingSafeEqual(hashBuffer, keyBuffer);
+}
+
+async function hashPasswordAsync(password: string): Promise<string> {
+  const salt = randomBytes(16).toString("hex");
+  const hash = (await scryptAsync(password, salt, 64)) as Buffer;
+  return `${salt}:${hash.toString("hex")}`;
 }
 
 export async function registerUser(
@@ -773,6 +916,12 @@ export async function registerUser(
   if (!password) {
     throw new Error("Informe uma senha.");
   }
+  if (password.length < 10 || password.length > 128) {
+    throw new Error("A senha deve ter entre 10 e 128 caracteres.");
+  }
+  if (cleanUsername.length > 32 || !/^[\p{L}\p{N}_.-]+$/u.test(cleanUsername)) {
+    throw new Error("Use até 32 letras, números, ponto, hífen ou sublinhado no usuário.");
+  }
   if (password !== confirmPassword) {
     throw new Error("A senha e a confirmação de senha não coincidem.");
   }
@@ -787,7 +936,7 @@ export async function registerUser(
   }
 
   const id = crypto.randomUUID();
-  const passwordHash = hashPassword(password);
+  const passwordHash = await hashPasswordAsync(password);
 
   const rows = await sql`
     INSERT INTO users (id, username, password_hash)
@@ -810,10 +959,11 @@ export async function loginUser(username: string, password: string): Promise<Aut
   const sql = getDb();
 
   const cleanUsername = username.trim();
-  if (!cleanUsername || !password) {
+  if (!cleanUsername || cleanUsername.length > 32 || !password) {
     throw new Error("Preencha usuário e senha.");
   }
 
+  if (password.length > 128) throw new Error("Usuário ou senha inválidos.");
   const rows = await sql`
     SELECT id, username, password_hash, created_at
     FROM users
@@ -821,7 +971,7 @@ export async function loginUser(username: string, password: string): Promise<Aut
     LIMIT 1
   `;
   const user = rows[0];
-  if (!user || !verifyPassword(password, String(user["password_hash"]))) {
+  if (!user || !(await verifyPassword(password, String(user["password_hash"])))) {
     throw new Error("Usuário ou senha inválidos.");
   }
 
@@ -830,4 +980,314 @@ export async function loginUser(username: string, password: string): Promise<Aut
     username: String(user["username"]),
     created_at: String(user["created_at"]),
   };
+}
+
+function parseAchievements(value: unknown): string[] {
+  if (Array.isArray(value)) return value.filter((item): item is string => typeof item === "string");
+  if (typeof value === "string") {
+    try {
+      const parsed: unknown = JSON.parse(value);
+      return Array.isArray(parsed) ? parsed.filter((item): item is string => typeof item === "string") : [];
+    } catch {
+      return [];
+    }
+  }
+  return [];
+}
+
+function toUserProfile(row: Record<string, unknown>): UserProfile {
+  const username = String(row["username"] ?? "");
+  const pictureVersion = Number(row["profile_picture_version"] ?? 0);
+  const bannerVersion = Number(row["banner_version"] ?? 0);
+  return {
+    id: String(row["id"]),
+    username,
+    nickname: String(row["nickname"] || username),
+    profile_picture: row["has_profile_picture"] ? `/api/auth?image=avatar&v=${pictureVersion}` : "",
+    caption: String(row["caption"] ?? ""),
+    bio: String(row["bio"] ?? ""),
+    background: row["has_banner"] ? `/api/auth?image=banner&v=${bannerVersion}` : "",
+    border_color: String(row["border_color"] ?? "#e74646"),
+    achievements: parseAchievements(row["achievements"]),
+    listened_minutes: Number(row["listened_minutes"] ?? 0),
+    orbs: Number(row["orbs"] ?? 0),
+    equipped_decoration: row["equipped_decoration"] ? String(row["equipped_decoration"]) : null,
+    missions: [],
+    mission_resets_at: "",
+    decorations: PROFILE_DECORATIONS,
+    owned_decorations: [],
+  };
+}
+
+export async function getUserProfile(userId: string): Promise<UserProfile | null> {
+  await ensureUsersSchema();
+  const sql = getDb();
+  const rows = await sql`
+    SELECT id, username, nickname, caption, bio, border_color, achievements, listened_minutes,
+           orbs, equipped_decoration, profile_picture_data IS NOT NULL AS has_profile_picture,
+           profile_picture_version, banner_data IS NOT NULL AS has_banner, banner_version
+    FROM users WHERE id = ${userId} LIMIT 1
+  `;
+  return rows[0] ? loadProfileDashboard(toUserProfile(rows[0])) : null;
+}
+
+function cleanProfileImageUrl(value: string, fieldName: string): string {
+  const clean = value.trim();
+  if (!clean) return "";
+  if (clean.length > 2048) throw new Error(`${fieldName} excede o tamanho permitido.`);
+  let url: URL;
+  try {
+    url = new URL(clean);
+  } catch {
+    throw new Error(`${fieldName} deve ser um endereço HTTPS válido.`);
+  }
+  const host = url.hostname.toLowerCase();
+  if (
+    url.protocol !== "https:" ||
+    url.username ||
+    url.password ||
+    isIP(host) ||
+    host.startsWith("[") ||
+    host === "localhost" ||
+    host.endsWith(".localhost") ||
+    host.endsWith(".local") ||
+    host.endsWith(".internal")
+  ) {
+    throw new Error(`${fieldName} deve ser um endereço HTTPS público.`);
+  }
+  return url.toString();
+}
+
+export async function updateUserProfile(
+  userId: string,
+  input: Pick<UserProfile, "nickname" | "caption" | "bio" | "border_color">
+): Promise<UserProfile> {
+  await ensureUsersSchema();
+  const sql = getDb();
+  const current = await getUserProfile(userId);
+  if (!current) throw new Error("Perfil não encontrado.");
+
+  const nickname = input.nickname.trim();
+  const caption = input.caption.trim();
+  const bio = input.bio.trim();
+  const borderColor = input.border_color.trim();
+  if (nickname.length > 40) throw new Error("O apelido deve ter até 40 caracteres.");
+  if (caption.length > 80) throw new Error("A legenda deve ter até 80 caracteres.");
+  if (bio.length > 500) throw new Error("A bio deve ter até 500 caracteres.");
+  if (!/^#[\da-f]{6}$/i.test(borderColor)) throw new Error("Escolha uma cor de borda válida.");
+
+  const hasCustomProfile = Boolean(nickname && nickname !== current.username || caption || bio || borderColor !== "#e74646");
+  const achievements = new Set(current.achievements);
+  if (hasCustomProfile) achievements.add("custom-profile");
+
+  await sql`
+    UPDATE users SET
+      nickname = ${nickname || current.username},
+      caption = ${caption},
+      bio = ${bio},
+      border_color = ${borderColor},
+      achievements = ${JSON.stringify([...achievements])}::jsonb
+    WHERE id = ${userId}
+  `;
+  const updated = await getUserProfile(userId);
+  if (!updated) throw new Error("Perfil não encontrado.");
+  return updated;
+}
+
+export async function recordListenedMinute(userId: string): Promise<void> {
+  await ensureUsersSchema();
+  const sql = getDb();
+  const rows = await sql`
+    UPDATE users
+    SET listened_minutes = listened_minutes + 1,
+        last_listened_at = NOW()
+    WHERE id = ${userId}
+      AND (last_listened_at IS NULL OR last_listened_at < NOW() - INTERVAL '50 seconds')
+    RETURNING listened_minutes
+  `;
+  const minutes = Number(rows[0]?.["listened_minutes"] ?? 0);
+  if (rows.length) {
+    const cycleId = await ensureMissionCycle(userId);
+    await sql`UPDATE user_mission_cycles SET listened_minutes = listened_minutes + 1 WHERE user_id = ${userId} AND cycle_id = ${cycleId}`;
+    await syncMissionProgress(userId, cycleId);
+  }
+  const profile = await getUserProfile(userId);
+  if (!profile || minutes < 60) return;
+  const achievements = new Set(profile.achievements);
+  if (minutes >= 60) achievements.add("first-hour");
+  if (minutes >= 600) achievements.add("ten-hours");
+  if (achievements.size !== profile.achievements.length) {
+    await sql`UPDATE users SET achievements = ${JSON.stringify([...achievements])}::jsonb WHERE id = ${userId}`;
+  }
+}
+
+function currentMissionCycle(now = Date.now()) {
+  const cycleMs = 6 * 60 * 60 * 1000;
+  const cycleId = Math.floor(now / cycleMs);
+  return { cycleId, resetsAt: new Date((cycleId + 1) * cycleMs).toISOString() };
+}
+
+async function syncMissionProgress(userId: string, cycleId: number) {
+  const sql = getDb();
+  await sql`
+    UPDATE user_mission_tasks AS task
+    SET progress = LEAST(task.target, CASE WHEN task.kind = 'songs' THEN cycle.songs_added ELSE cycle.listened_minutes END),
+        completed_at = CASE WHEN (CASE WHEN task.kind = 'songs' THEN cycle.songs_added ELSE cycle.listened_minutes END) >= task.target THEN COALESCE(task.completed_at, NOW()) ELSE task.completed_at END
+    FROM user_mission_cycles AS cycle
+    WHERE task.user_id = ${userId} AND task.cycle_id = ${cycleId}
+      AND cycle.user_id = task.user_id AND cycle.cycle_id = task.cycle_id
+  `;
+  await sql`
+    WITH claimed AS (
+      UPDATE user_mission_tasks SET reward_claimed = TRUE
+      WHERE user_id = ${userId} AND cycle_id = ${cycleId} AND progress >= target AND reward_claimed = FALSE
+      RETURNING reward
+    ), total AS (SELECT COALESCE(SUM(reward), 0)::INTEGER AS amount FROM claimed)
+    UPDATE users SET orbs = orbs + (SELECT amount FROM total)
+    WHERE id = ${userId} AND (SELECT amount FROM total) > 0
+  `;
+}
+
+async function ensureMissionCycle(userId: string) {
+  const sql = getDb();
+  const { cycleId } = currentMissionCycle();
+  await sql`INSERT INTO user_mission_cycles (user_id, cycle_id) VALUES (${userId}, ${cycleId}) ON CONFLICT DO NOTHING`;
+  const existing = await sql`SELECT mission_id FROM user_mission_tasks WHERE user_id = ${userId} AND cycle_id = ${cycleId}`;
+  if (existing.length < 3) {
+    const previous = await sql`SELECT mission_id FROM user_mission_tasks WHERE user_id = ${userId} AND cycle_id = ${cycleId - 1}`;
+    const recentlyUsed = new Set(previous.map(row => String(row["mission_id"])));
+    const seed = createHash("sha256").update(`${userId}:${cycleId}`).digest();
+    let state = seed.readUInt32BE(0) || 1;
+    const random = () => { state ^= state << 13; state ^= state >>> 17; state ^= state << 5; return (state >>> 0) / 0x100000000; };
+    const songs = PROFILE_MISSION_CATALOG.filter(item => item.kind === "songs" && !recentlyUsed.has(item.id));
+    const listening = PROFILE_MISSION_CATALOG.filter(item => item.kind === "listening" && !recentlyUsed.has(item.id));
+    const choose = (items: typeof PROFILE_MISSION_CATALOG) => items.splice(Math.floor(random() * items.length), 1)[0]!;
+    const chosen = [choose(songs), choose(listening)];
+    const remaining = PROFILE_MISSION_CATALOG.filter(item => !recentlyUsed.has(item.id) && !chosen.some(selected => selected.id === item.id));
+    chosen.push(choose(remaining));
+    for (const mission of chosen) {
+      await sql`INSERT INTO user_mission_tasks (user_id, cycle_id, mission_id, title, description, kind, target, reward) VALUES (${userId}, ${cycleId}, ${mission.id}, ${mission.title}, ${mission.description}, ${mission.kind}, ${mission.target}, ${mission.reward}) ON CONFLICT DO NOTHING`;
+    }
+  }
+  await syncMissionProgress(userId, cycleId);
+  await sql`DELETE FROM user_mission_cycles WHERE user_id = ${userId} AND cycle_id < ${cycleId - 8}`;
+  return cycleId;
+}
+
+async function loadProfileDashboard(profile: UserProfile): Promise<UserProfile> {
+  const sql = getDb();
+  const cycleId = await ensureMissionCycle(profile.id);
+  const [tasks, owned, updated] = await Promise.all([
+    sql`SELECT mission_id, title, description, kind, target, progress, reward FROM user_mission_tasks WHERE user_id = ${profile.id} AND cycle_id = ${cycleId} ORDER BY mission_id`,
+    sql`SELECT decoration_id FROM user_profile_decorations WHERE user_id = ${profile.id}`,
+    sql`SELECT orbs, equipped_decoration FROM users WHERE id = ${profile.id} LIMIT 1`,
+  ]);
+  return {
+    ...profile,
+    orbs: Number(updated[0]?.["orbs"] ?? 0),
+    equipped_decoration: updated[0]?.["equipped_decoration"] ? String(updated[0]["equipped_decoration"]) : null,
+    missions: tasks.map(row => ({ id: String(row["mission_id"]), title: String(row["title"]), description: String(row["description"]), kind: String(row["kind"]) as "songs" | "listening", target: Number(row["target"]), progress: Number(row["progress"]), reward: Number(row["reward"]), completed: Number(row["progress"]) >= Number(row["target"]) })),
+    mission_resets_at: currentMissionCycle().resetsAt,
+    owned_decorations: owned.map(row => String(row["decoration_id"])),
+  };
+}
+
+export async function storeProfileImage(userId: string, kind: ProfileImageKind, mime: string, bytes: Buffer) {
+  await ensureUsersSchema();
+  const sql = getDb();
+  if (kind === "avatar") await sql`UPDATE users SET profile_picture_data = ${bytes}, profile_picture_mime = ${mime}, profile_picture_version = profile_picture_version + 1 WHERE id = ${userId}`;
+  else await sql`UPDATE users SET banner_data = ${bytes}, banner_mime = ${mime}, banner_version = banner_version + 1 WHERE id = ${userId}`;
+}
+
+export async function getProfileImage(userId: string, kind: ProfileImageKind) {
+  await ensureUsersSchema();
+  const sql = getDb();
+  const rows = kind === "avatar"
+    ? await sql`SELECT profile_picture_mime AS mime, encode(profile_picture_data, 'base64') AS data FROM users WHERE id = ${userId} AND profile_picture_data IS NOT NULL LIMIT 1`
+    : await sql`SELECT banner_mime AS mime, encode(banner_data, 'base64') AS data FROM users WHERE id = ${userId} AND banner_data IS NOT NULL LIMIT 1`;
+  if (!rows[0]) return null;
+  return { mime: String(rows[0]["mime"]), bytes: Buffer.from(String(rows[0]["data"]), "base64") };
+}
+
+export async function recordSongMissionProgress(userId: string) {
+  await ensureUsersSchema();
+  const cycleId = await ensureMissionCycle(userId);
+  const sql = getDb();
+  await sql`UPDATE user_mission_cycles SET songs_added = songs_added + 1 WHERE user_id = ${userId} AND cycle_id = ${cycleId}`;
+  await syncMissionProgress(userId, cycleId);
+}
+
+export async function redeemProfileDecoration(userId: string, decorationId: string) {
+  await ensureUsersSchema();
+  const decoration = PROFILE_DECORATIONS.find(item => item.id === decorationId);
+  if (!decoration) throw new Error("DecoraÃ§Ã£o invÃ¡lida.");
+  const sql = getDb();
+  const rows = await sql`
+    WITH debited AS (
+      UPDATE users SET orbs = orbs - ${decoration.cost}
+      WHERE id = ${userId} AND orbs >= ${decoration.cost}
+        AND NOT EXISTS (SELECT 1 FROM user_profile_decorations WHERE user_id = ${userId} AND decoration_id = ${decorationId})
+      RETURNING id
+    )
+    INSERT INTO user_profile_decorations (user_id, decoration_id)
+    SELECT id, ${decorationId} FROM debited
+    ON CONFLICT DO NOTHING
+    RETURNING user_id
+  `;
+  if (!rows.length) throw new Error("Orbs insuficientes ou decoraÃ§Ã£o jÃ¡ resgatada.");
+  return getUserProfile(userId);
+}
+
+export async function equipProfileDecoration(userId: string, decorationId: string | null) {
+  await ensureUsersSchema();
+  const sql = getDb();
+  if (decorationId === null) await sql`UPDATE users SET equipped_decoration = NULL WHERE id = ${userId}`;
+  else {
+    if (!PROFILE_DECORATIONS.some(item => item.id === decorationId)) throw new Error("DecoraÃ§Ã£o invÃ¡lida.");
+    const rows = await sql`UPDATE users SET equipped_decoration = ${decorationId} WHERE id = ${userId} AND EXISTS (SELECT 1 FROM user_profile_decorations WHERE user_id = ${userId} AND decoration_id = ${decorationId}) RETURNING id`;
+    if (!rows.length) throw new Error("Resgate esta decoraÃ§Ã£o antes de equipÃ¡-la.");
+  }
+  return getUserProfile(userId);
+}
+
+export async function createAuthSession(userId: string): Promise<string> {
+  await ensureUsersSchema();
+  const token = randomBytes(32).toString("base64url");
+  const tokenHash = createHash("sha256").update(token).digest("hex");
+  const sql = getDb();
+  await sql`DELETE FROM auth_sessions WHERE expires_at <= NOW()`;
+  await sql`
+    INSERT INTO auth_sessions (token_hash, user_id, expires_at)
+    VALUES (${tokenHash}, ${userId}, NOW() + INTERVAL '30 days')
+  `;
+  return token;
+}
+
+export async function getAuthSession(token: string | null): Promise<AuthUser | null> {
+  if (!token || token.length > 128) return null;
+  await ensureUsersSchema();
+  const tokenHash = createHash("sha256").update(token).digest("hex");
+  const sql = getDb();
+  const rows = await sql`
+    SELECT u.id, u.username, u.created_at
+    FROM auth_sessions s
+    INNER JOIN users u ON u.id = s.user_id
+    WHERE s.token_hash = ${tokenHash} AND s.expires_at > NOW()
+    LIMIT 1
+  `;
+  const user = rows[0];
+  if (!user) return null;
+  return {
+    id: String(user["id"]),
+    username: String(user["username"]),
+    created_at: String(user["created_at"]),
+  };
+}
+
+export async function revokeAuthSession(token: string | null): Promise<void> {
+  if (!token || token.length > 128) return;
+  await ensureUsersSchema();
+  const tokenHash = createHash("sha256").update(token).digest("hex");
+  const sql = getDb();
+  await sql`DELETE FROM auth_sessions WHERE token_hash = ${tokenHash}`;
 }

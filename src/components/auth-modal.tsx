@@ -1,10 +1,11 @@
 import { useState } from 'react';
 import { Link, useNavigate } from '@tanstack/react-router';
-import { LogIn, LogOut, Radio, User, UserPlus } from 'lucide-react';
+import { ArrowLeft, LogIn, LogOut, Radio, ShieldCheck, User, UserPlus } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/components/ui/dialog';
 import { useMusic } from '@/components/music-provider';
+import { ProfilePage } from '@/components/profile-page';
 
 export function AuthForm({
   initialMode = 'login',
@@ -43,19 +44,21 @@ export function AuthForm({
       setConfirmPassword('');
       onSuccess?.();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Erro ao processar solicitação.');
+      setError(err instanceof Error ? err.message : 'Não foi possível concluir a solicitação.');
     } finally {
       setSubmitting(false);
     }
   };
 
   return (
-    <div className="grid gap-4">
-      <div className="grid grid-cols-2 gap-2">
+    <div className="auth-form-wrap">
+      <div className="auth-switch" role="tablist" aria-label="Acesso à conta">
         <Button
           type="button"
+          role="tab"
+          aria-selected={mode === 'login'}
           size="sm"
-          variant={mode === 'login' ? 'default' : 'outline'}
+          variant={mode === 'login' ? 'default' : 'ghost'}
           onClick={() => switchMode('login')}
         >
           <LogIn />
@@ -63,8 +66,10 @@ export function AuthForm({
         </Button>
         <Button
           type="button"
+          role="tab"
+          aria-selected={mode === 'register'}
           size="sm"
-          variant={mode === 'register' ? 'default' : 'outline'}
+          variant={mode === 'register' ? 'default' : 'ghost'}
           onClick={() => switchMode('register')}
         >
           <UserPlus />
@@ -72,16 +77,20 @@ export function AuthForm({
         </Button>
       </div>
 
-      <form className="dialog-form" onSubmit={event => void handleSubmit(event)}>
+      <form className="dialog-form auth-form" onSubmit={event => void handleSubmit(event)}>
         <label>
-          Usuário
+          Nome de usuário
           <Input
-            aria-label="Usuário"
-            value={username}
-            onChange={event => setUsername(event.target.value)}
-            placeholder="Digite seu usuário"
+            aria-label="Nome de usuário"
+            aria-invalid={Boolean(error)}
+            autoCapitalize="none"
             autoComplete="username"
+            maxLength={32}
+            name="username"
+            onChange={event => setUsername(event.target.value)}
+            placeholder="Seu nome de usuário"
             required
+            value={username}
           />
         </label>
 
@@ -89,12 +98,16 @@ export function AuthForm({
           Senha
           <Input
             aria-label="Senha"
+            aria-invalid={Boolean(error)}
+            autoComplete={mode === 'login' ? 'current-password' : 'new-password'}
+            maxLength={128}
+            minLength={mode === 'register' ? 10 : undefined}
+            name="password"
+            onChange={event => setPassword(event.target.value)}
+            placeholder={mode === 'register' ? 'Use pelo menos 10 caracteres' : 'Sua senha'}
+            required
             type="password"
             value={password}
-            onChange={event => setPassword(event.target.value)}
-            placeholder="Digite sua senha"
-            autoComplete={mode === 'login' ? 'current-password' : 'new-password'}
-            required
           />
         </label>
 
@@ -103,28 +116,30 @@ export function AuthForm({
             Confirmar senha
             <Input
               aria-label="Confirmar senha"
+              aria-invalid={Boolean(error)}
+              autoComplete="new-password"
+              maxLength={128}
+              name="confirmPassword"
+              onChange={event => setConfirmPassword(event.target.value)}
+              placeholder="Digite a senha novamente"
+              required
               type="password"
               value={confirmPassword}
-              onChange={event => setConfirmPassword(event.target.value)}
-              placeholder="Repita sua senha"
-              autoComplete="new-password"
-              required
             />
           </label>
         )}
 
-        {error && <p className="text-xs text-primary">{error}</p>}
+        {error && <p className="auth-error" role="alert">{error}</p>}
 
-        <Button type="submit" disabled={submitting}>
+        <Button className="auth-submit" type="submit" disabled={submitting}>
           {mode === 'login' ? <LogIn /> : <UserPlus />}
           {submitting
-            ? mode === 'login'
-              ? 'Entrando...'
-              : 'Criando conta...'
-            : mode === 'login'
-              ? 'Entrar'
-              : 'Cadastrar'}
+            ? mode === 'login' ? 'Entrando…' : 'Criando conta…'
+            : mode === 'login' ? 'Entrar na conta' : 'Criar minha conta'}
         </Button>
+        <p className="auth-form-note">
+          <ShieldCheck size={14} /> Sua senha é protegida e nunca aparece no seu perfil.
+        </p>
       </form>
     </div>
   );
@@ -158,9 +173,7 @@ export function AuthButton() {
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent>
           <DialogTitle>Acesse sua conta</DialogTitle>
-          <DialogDescription>
-            Entre com seu usuário e senha ou crie uma conta para participar das salas musicais.
-          </DialogDescription>
+          <DialogDescription>Entre ou crie uma conta para participar das salas musicais.</DialogDescription>
           <AuthForm onSuccess={() => setOpen(false)} />
         </DialogContent>
       </Dialog>
@@ -172,41 +185,33 @@ export function LoginPage() {
   const m = useMusic();
   const nav = useNavigate();
 
+  if (m.currentUser) return <ProfilePage />;
+
   return (
-    <main className="page">
-      <div className="greeting">
-        <div>
-          <h1>Conta Votefy</h1>
-          <p>Entre com seu usuário ou crie seu perfil em segundos</p>
-        </div>
-        <Button variant="ghost" size="sm" asChild>
-          <Link to="/">
-            <Radio />
-            Voltar ao início
-          </Link>
-        </Button>
+    <main className="auth-page">
+      <div className="auth-page-top">
+        <Link className="auth-back" to="/">
+          <ArrowLeft size={16} /> Voltar ao Votefy
+        </Link>
+        <Link className="auth-brand" to="/" aria-label="Votefy início">
+          <span className="brand-mark" aria-hidden="true"><i /><i /><i /><i /></span>
+          Votefy
+        </Link>
       </div>
 
-      <section className="section max-w-md mx-auto">
-        {m.currentUser ? (
-          <div className="empty-state">
-            <User />
-            <h2>Conectado como {m.currentUser.username}</h2>
-            <p>Seu usuário já está ativo para votar nas músicas e entrar nas salas.</p>
-            <div className="flex gap-2">
-              <Button asChild>
-                <Link to="/rooms">Ir para salas</Link>
-              </Button>
-              <Button variant="outline" onClick={() => m.logout()}>
-                <LogOut />
-                Sair da conta
-              </Button>
-            </div>
-          </div>
-        ) : (
-          <AuthForm onSuccess={() => void nav({ to: '/' })} />
-        )}
+      <section className="auth-card" aria-labelledby="auth-title">
+        <div className="auth-card-heading">
+          <span className="auth-icon"><Radio size={21} /></span>
+          <span className="eyebrow">Sua comunidade musical</span>
+          <h1 id="auth-title">Sua música. Sua conta.</h1>
+          <p>Entre para votar, criar salas e curtir música junto com todo mundo.</p>
+        </div>
+
+        <AuthForm onSuccess={() => void nav({ to: '/' })} />
+        <p className="auth-privacy"><ShieldCheck size={14} /> Acesso protegido em conexão segura</p>
       </section>
+
+      <p className="auth-footer">Votefy <span>·</span> Música é melhor quando compartilhada.</p>
     </main>
   );
 }

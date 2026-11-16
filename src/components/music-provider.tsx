@@ -102,29 +102,8 @@ function mapSongToTrack(song: ApiSongRecord): CloudTrack {
 }
 
 function useMusicState() {
-  const [currentUser, setCurrentUser] = useState<CurrentUser | null>(() => {
-    if (typeof window === 'undefined') return null;
-    try {
-      const saved = localStorage.getItem('votefy_auth_user');
-      return saved ? (JSON.parse(saved) as CurrentUser) : null;
-    } catch {
-      return null;
-    }
-  });
-  const [userId, setUserId] = useState<string>(() => {
-    if (typeof window !== 'undefined') {
-      try {
-        const saved = localStorage.getItem('votefy_auth_user');
-        if (saved) {
-          const parsed = JSON.parse(saved) as CurrentUser;
-          if (parsed?.id) return parsed.id;
-        }
-      } catch {
-        // fallback para UUID anônimo
-      }
-    }
-    return getOrCreateClientUserId();
-  });
+  const [currentUser, setCurrentUser] = useState<CurrentUser | null>(null);
+  const [userId, setUserId] = useState<string>(() => getOrCreateClientUserId());
   const [tracks, setTracks] = useState<CloudTrack[]>([]);
   const [playlists, setPlaylists] = useState<Playlist[]>([]);
   const [favorites, setFavorites] = useState<string[]>([]);
@@ -260,7 +239,6 @@ function useMusicState() {
       throw new Error(payload.error || 'Não foi possível entrar.');
     }
     const session: CurrentUser = { id: payload.id, username: payload.username };
-    localStorage.setItem('votefy_auth_user', JSON.stringify(session));
     setCurrentUser(session);
     setUserId(session.id);
     userIdRef.current = session.id;
@@ -280,7 +258,6 @@ function useMusicState() {
       throw new Error(payload.error || 'Não foi possível criar a conta.');
     }
     const session: CurrentUser = { id: payload.id, username: payload.username };
-    localStorage.setItem('votefy_auth_user', JSON.stringify(session));
     setCurrentUser(session);
     setUserId(session.id);
     userIdRef.current = session.id;
@@ -290,7 +267,7 @@ function useMusicState() {
   };
 
   const logout = () => {
-    localStorage.removeItem('votefy_auth_user');
+    void fetch('/api/auth', { method: 'DELETE' });
     const guestId = getOrCreateClientUserId();
     setCurrentUser(null);
     setUserId(guestId);
@@ -370,6 +347,7 @@ function useMusicState() {
     element.onerror = () => setNotice('Este link de áudio não pôde ser reproduzido.');
 
     try {
+      localStorage.removeItem('votefy_auth_user');
       const state = JSON.parse(localStorage.getItem('onda-state') || '{}');
       setPlaylists(state.playlists || []);
       setFavorites(state.favorites || []);
@@ -380,7 +358,25 @@ function useMusicState() {
       setNotice('Não foi possível recuperar as preferências salvas.');
     }
 
-    Promise.all([refreshTracks(), refreshRooms()]).finally(() => setReady(true));
+    const restoreSession = async () => {
+      try {
+        const response = await fetch('/api/auth', { cache: 'no-store' });
+        if (response.ok) {
+          const payload = (await response.json()) as { user?: CurrentUser | null };
+          if (payload.user?.id && payload.user.username) {
+            setCurrentUser(payload.user);
+            setUserId(payload.user.id);
+            userIdRef.current = payload.user.id;
+          }
+        }
+      } catch {
+        // A navegação como visitante continua disponível se a restauração falhar.
+      }
+    };
+
+    void restoreSession().finally(() => {
+      void Promise.all([refreshTracks(), refreshRooms()]).finally(() => setReady(true));
+    });
     const syncInterval = setInterval(() => {
       void refreshTracks();
       void refreshRooms();
@@ -465,7 +461,7 @@ function useMusicState() {
       void fetch('/api/rooms', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'next', roomId, trackId: id }),
+        body: JSON.stringify({ action: 'next', roomId, trackId: id, userId: userIdRef.current }),
       })
         .then(r => (r.ok ? r.json() : null))
         .then((updated: Room | null) => {
@@ -478,7 +474,7 @@ function useMusicState() {
     const response = await fetch('/api/rooms', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action: 'next', roomId: id, trackId: manual }),
+      body: JSON.stringify({ action: 'next', roomId: id, trackId: manual, userId: userIdRef.current }),
     });
     const payload = (await response.json()) as Room & { error?: string };
     if (!response.ok) {
@@ -526,6 +522,18 @@ function useMusicState() {
   useEffect(() => {
     if (audio.current) audio.current.onended = () => onEndedRef.current();
   }, []);
+
+  useEffect(() => {
+    if (!currentUser || !playing) return;
+    const interval = setInterval(() => {
+      void fetch('/api/auth', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'listen' }),
+      }).catch(() => {});
+    }, 60_000);
+    return () => clearInterval(interval);
+  }, [currentUser, playing]);
 
   const toggle = () => {
     const activeTrack = tracksRef.current.find(t => t.id === currentRef.current);
@@ -699,7 +707,7 @@ function useMusicState() {
     const response = await fetch('/api/rooms', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action: 'controls', roomId, patch }),
+      body: JSON.stringify({ action: 'controls', roomId, patch, userId: userIdRef.current }),
     });
     const payload = (await response.json()) as Room & { error?: string };
     if (!response.ok) {

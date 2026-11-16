@@ -1,5 +1,19 @@
 import { createFileRoute } from "@tanstack/react-router";
 
+function readSessionCookie(cookieHeader: string | null): string | null {
+  const value = cookieHeader
+    ?.split(";")
+    .map(part => part.trim())
+    .find(part => part.startsWith("votefy_session="))
+    ?.slice("votefy_session=".length);
+  if (!value) return null;
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return null;
+  }
+}
+
 export const Route = createFileRoute("/api/rooms")({
   server: {
     handlers: {
@@ -7,9 +21,10 @@ export const Route = createFileRoute("/api/rooms")({
         try {
           const url = new URL(request.url);
           const roomId = url.searchParams.get("roomId");
-          const userId = url.searchParams.get("userId") ?? undefined;
-
           const { getRoomSnapshot, listActiveRooms } = await import("@/lib/neon-database.server");
+          const { getAuthSession } = await import("@/lib/neon-database.server");
+          const authenticatedUser = await getAuthSession(readSessionCookie(request.headers.get("cookie")));
+          const userId = authenticatedUser?.id ?? url.searchParams.get("userId") ?? undefined;
 
           if (roomId) {
             const room = await getRoomSnapshot(roomId, userId, true);
@@ -24,7 +39,7 @@ export const Route = createFileRoute("/api/rooms")({
         } catch (error) {
           console.error("Erro em GET /api/rooms:", error);
           return Response.json(
-            { error: error instanceof Error ? error.message : "Erro ao buscar salas." },
+            { error: "Erro ao buscar salas." },
             { status: 500 }
           );
         }
@@ -32,6 +47,10 @@ export const Route = createFileRoute("/api/rooms")({
 
       POST: async ({ request }) => {
         try {
+          const origin = request.headers.get("origin");
+          if (!origin || origin !== new URL(request.url).origin) {
+            return Response.json({ error: "Solicitação inválida." }, { status: 403 });
+          }
           const body = (await request.json()) as {
             action?: string;
             roomId?: string;
@@ -52,77 +71,93 @@ export const Route = createFileRoute("/api/rooms")({
           };
 
           const db = await import("@/lib/neon-database.server");
+          const authenticatedUser = await db.getAuthSession(readSessionCookie(request.headers.get("cookie")));
+          // A valid account cookie takes precedence over browser-supplied identity values.
+          const userId = authenticatedUser?.id ?? body.userId;
+          const userName = authenticatedUser?.username ?? body.userName;
 
           switch (body.action) {
             case "create": {
-              if (!body.name?.trim() || !body.userId || !body.userName?.trim()) {
+              if (!body.name?.trim() || !userId || !userName?.trim()) {
                 return Response.json({ error: "Nome da sala e do host são obrigatórios." }, { status: 400 });
               }
-              const room = await db.createMusicRoom(body.name, body.userId, body.userName);
+              const room = await db.createMusicRoom(body.name, userId, userName);
               return Response.json(room, { status: 201 });
             }
 
             case "join": {
-              if (!body.roomId?.trim() || !body.userId || !body.userName?.trim()) {
+              if (!body.roomId?.trim() || !userId || !userName?.trim()) {
                 return Response.json({ error: "Código da sala e seu nome são obrigatórios." }, { status: 400 });
               }
-              const room = await db.joinMusicRoom(body.roomId, body.userId, body.userName);
+              const room = await db.joinMusicRoom(body.roomId, userId, userName);
               return Response.json(room);
             }
 
             case "vote": {
-              if (!body.roomId || !body.userId || !body.trackId) {
+              if (!body.roomId || !userId || !body.trackId) {
                 return Response.json({ error: "Dados de voto inválidos." }, { status: 400 });
               }
-              const room = await db.castRoomVote(body.roomId, body.userId, body.trackId, Boolean(body.isGolden));
+              const room = await db.castRoomVote(body.roomId, userId, body.trackId, Boolean(body.isGolden));
               return Response.json(room);
             }
 
             case "skipVote": {
-              if (!body.roomId || !body.userId) {
+              if (!body.roomId || !userId) {
                 return Response.json({ error: "Dados de skip inválidos." }, { status: 400 });
               }
-              const result = await db.voteSkipRoomTrack(body.roomId, body.userId);
+              const result = await db.voteSkipRoomTrack(body.roomId, userId);
               return Response.json(result);
             }
 
             case "next": {
-              if (!body.roomId) {
+              if (!body.roomId || !userId) {
                 return Response.json({ error: "ID da sala obrigatório." }, { status: 400 });
               }
-              const room = await db.advanceRoomTrack(body.roomId, body.trackId);
-              return Response.json(room);
+              const currentRoom = await db.getRoomSnapshot(body.roomId, userId, false);
+              if (!currentRoom || currentRoom.admin !== userId) {
+                return Response.json({ error: "Somente o host pode avançar a música." }, { status: 403 });
+              }
+              const updatedRoom = await db.advanceRoomTrack(body.roomId, body.trackId);
+              return Response.json(updatedRoom);
             }
 
             case "controls": {
-              if (!body.roomId || !body.patch) {
+              if (!body.roomId || !body.patch || !userId) {
                 return Response.json({ error: "Dados de controle inválidos." }, { status: 400 });
               }
-              const room = await db.updateRoomControls(body.roomId, body.patch);
-              return Response.json(room);
+              const currentRoom = await db.getRoomSnapshot(body.roomId, userId, false);
+              if (!currentRoom || currentRoom.admin !== userId) {
+                return Response.json({ error: "Somente o host pode alterar os controles." }, { status: 403 });
+              }
+              const updatedRoom = await db.updateRoomControls(body.roomId, body.patch);
+              return Response.json(updatedRoom);
             }
 
             case "chat": {
-              if (!body.roomId || !body.userId || !body.text) {
+              if (!body.roomId || !userId || !body.text) {
                 return Response.json({ error: "Mensagem inválida." }, { status: 400 });
               }
-              const room = await db.sendRoomChatMessage(body.roomId, body.userId, body.text);
+              const room = await db.sendRoomChatMessage(body.roomId, userId, body.text);
               return Response.json(room);
             }
 
             case "leave": {
-              if (!body.roomId || !body.userId) {
+              if (!body.roomId || !userId) {
                 return Response.json({ error: "Dados inválidos." }, { status: 400 });
               }
-              await db.leaveOrRemoveFromRoom(body.roomId, body.targetUserId ?? body.userId);
+              const room = await db.getRoomSnapshot(body.roomId, userId, false);
+              if (!room || (body.targetUserId && room.admin !== userId && body.targetUserId !== userId)) {
+                return Response.json({ error: "Ação não permitida." }, { status: 403 });
+              }
+              await db.leaveOrRemoveFromRoom(body.roomId, body.targetUserId ?? userId);
               return Response.json({ ok: true });
             }
 
             case "close": {
-              if (!body.roomId || !body.userId) {
+              if (!body.roomId || !userId) {
                 return Response.json({ error: "Dados inválidos." }, { status: 400 });
               }
-              await db.closeMusicRoom(body.roomId, body.userId);
+              await db.closeMusicRoom(body.roomId, userId);
               return Response.json({ ok: true });
             }
 
@@ -132,7 +167,7 @@ export const Route = createFileRoute("/api/rooms")({
         } catch (error) {
           console.error("Erro em POST /api/rooms:", error);
           return Response.json(
-            { error: error instanceof Error ? error.message : "Erro ao processar ação da sala." },
+            { error: "Erro ao processar a ação da sala." },
             { status: 400 }
           );
         }
