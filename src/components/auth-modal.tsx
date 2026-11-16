@@ -6,7 +6,6 @@ import { Input } from '@/components/ui/input';
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/components/ui/dialog';
 import { useMusic } from '@/components/music-provider';
 import { HomePage } from '@/components/music-app';
-import { HomePage } from '@/components/music-app';
 
 export function AuthForm({
   initialMode = 'login',
