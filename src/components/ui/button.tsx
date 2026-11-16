@@ -37,9 +37,10 @@ export interface ButtonProps
 }
 
 const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
-  ({ className, variant, size, asChild = false, onPointerMove, onWheel, ...props }, ref) => {
+  ({ className, variant, size, asChild = false, onPointerMove, onPointerLeave, onWheel, onClick, ...props }, ref) => {
     const Comp = asChild ? Slot : "button";
     const wheelTimer = React.useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+    const clickTimer = React.useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
     return (
       <Comp
         data-variant={variant ?? 'default'}
@@ -47,9 +48,20 @@ const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
         ref={ref}
         onPointerMove={event => {
           const bounds = event.currentTarget.getBoundingClientRect();
-          event.currentTarget.style.setProperty('--glass-x', `${event.clientX - bounds.left}px`);
-          event.currentTarget.style.setProperty('--glass-y', `${event.clientY - bounds.top}px`);
+          const x = (event.clientX - bounds.left) / Math.max(bounds.width, 1);
+          const y = (event.clientY - bounds.top) / Math.max(bounds.height, 1);
+          event.currentTarget.style.setProperty('--glass-x', `${Math.round(x * 100)}%`);
+          event.currentTarget.style.setProperty('--glass-y', `${Math.round(y * 100)}%`);
+          if (event.pointerType === 'mouse') {
+            event.currentTarget.style.setProperty('--glass-tilt-x', `${((0.5 - y) * 7).toFixed(1)}deg`);
+            event.currentTarget.style.setProperty('--glass-tilt-y', `${((x - 0.5) * 8).toFixed(1)}deg`);
+          }
           onPointerMove?.(event);
+        }}
+        onPointerLeave={event => {
+          event.currentTarget.style.setProperty('--glass-tilt-x', '0deg');
+          event.currentTarget.style.setProperty('--glass-tilt-y', '0deg');
+          onPointerLeave?.(event);
         }}
         onWheel={event => {
           const target = event.currentTarget;
@@ -57,6 +69,13 @@ const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
           if (wheelTimer.current) clearTimeout(wheelTimer.current);
           wheelTimer.current = setTimeout(() => { delete target.dataset.glassScroll; }, 360);
           onWheel?.(event);
+        }}
+        onClick={event => {
+          const target = event.currentTarget;
+          target.dataset.glassPress = 'true';
+          if (clickTimer.current) clearTimeout(clickTimer.current);
+          clickTimer.current = setTimeout(() => { delete target.dataset.glassPress; }, 520);
+          onClick?.(event);
         }}
         {...props}
       />
