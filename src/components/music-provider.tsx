@@ -39,7 +39,7 @@ function useMusicState() {
   }, []);
   useEffect(() => { if (ready) { try { localStorage.setItem('onda-state', JSON.stringify({ playlists, favorites, rooms, volume, shuffle, repeat })); } catch { setNotice('Não foi possível salvar. O armazenamento pode estar cheio.'); } } }, [ready, playlists, favorites, rooms, volume, shuffle, repeat]);
   useEffect(() => { if (audio.current) audio.current.volume = volume; }, [volume]);
-  useEffect(() => { if (notice) { const timer = setTimeout(() => setNotice(''), 6500); return () => clearTimeout(timer); } }, [notice]);
+  useEffect(() => { if (notice) { const timer = setTimeout(() => setNotice(''), 6500); return () => clearTimeout(timer); } return undefined; }, [notice]);
   const updateRoom = (id: string, change: (room: Room) => Room) => setRooms(previous => previous.map(room => room.id === id ? change(room) : room));
   const play = (id: string, ids?: string[], roomId?: string) => {
     const track = tracks.find(t => t.id === id); const element = audio.current;
@@ -67,7 +67,8 @@ function useMusicState() {
     const ids = (queue.length ? queue : tracks.map(t => t.id)).filter(id => tracks.some(t => t.id === id));
     if (!ids.length) return;
     const index = ids.indexOf(current || '');
-    play(ids[shuffle ? Math.floor(Math.random() * ids.length) : (index + direction + ids.length) % ids.length], ids);
+    const next = ids[shuffle ? Math.floor(Math.random() * ids.length) : (index + direction + ids.length) % ids.length];
+    if (next) play(next, ids);
   };
   useEffect(() => { if (audio.current) audio.current.onended = () => { if (activeRoom) finishRound(activeRoom); else if (repeat && audio.current) { audio.current.currentTime = 0; void audio.current.play(); } else skip(); }; });
   const toggle = () => { if (!audio.current) return; if (!current) { if (tracks[0]) play(tracks[0].id); return; } if (playing) audio.current.pause(); else audio.current.play().catch(() => setNotice('Não foi possível reproduzir este arquivo.')); };

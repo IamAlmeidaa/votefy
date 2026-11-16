@@ -1,6 +1,6 @@
 import { openDB } from 'idb';
 
-export type Track = { id: string; title: string; artist: string; album: string; filename: string; duration: number; file: Blob; cover?: Blob; added: number };
+export type Track = { id: string; title: string; artist: string; album: string; filename: string; duration: number; file: Blob; cover?: Blob | undefined; added: number };
 export type Playlist = { id: string; name: string; tracks: string[]; art: number };
 export type Participant = { id: string; name: string };
 export type Room = { id: string; name: string; admin: string; active: string; participants: Participant[]; current?: string; options: string[]; votes: Record<string,string>; open: boolean; queue: string[]; history: { track: string; votes: number }[]; chat: { name: string; text: string }[] };
@@ -10,7 +10,7 @@ export function vote(room: Room, participant: string, track: string, available: 
 }
 export function candidates(ids: string[], current?: string, random = Math.random): string[] {
   const remaining = [...new Set(ids)].filter(id => id !== current);
-  for (let i = remaining.length - 1; i > 0; i--) { const j = Math.floor(random() * (i + 1)); [remaining[i], remaining[j]] = [remaining[j], remaining[i]]; }
+  for (let i = remaining.length - 1; i > 0; i--) { const j = Math.floor(random() * (i + 1)); const a = remaining[i]; const b = remaining[j]; if (a !== undefined && b !== undefined) { remaining[i] = b; remaining[j] = a; } }
   return remaining.slice(0, 4);
 }
 export function winner(room: Room, available: string[], random = Math.random): string | undefined {
