@@ -4,3 +4,4 @@
 - [x] Salas simuladas, votação, administração, fila, histórico e chat.
 - [x] Interface desktop/mobile, 15 testes e verificação com arquivos WAV reais.
 - [x] Documentar execução e limitações: React exigido pelo Lovable; sem entrega em três arquivos puros nem instalação offline.
+- [ ] Definir e implementar salas LAN reais para compartilhar a biblioteca do host na rede local.
