@@ -54,9 +54,15 @@ export const Route = createFileRoute("/api/songs")({
             );
           }
 
-          const newSong = await createSong(body.mediaUrl.trim(), body.title);
           const user = await getAuthSession(readSessionCookie(request.headers.get("cookie")));
-          if (user) await recordSongMissionProgress(user.id);
+          if (!user) {
+            return Response.json(
+              { error: "Entre na sua conta para adicionar músicas." },
+              { status: 401 }
+            );
+          }
+          const newSong = await createSong(body.mediaUrl.trim(), body.title);
+          await recordSongMissionProgress(user.id);
           return Response.json(newSong, { status: 201 });
         } catch (error) {
           console.error("Erro ao processar requisição em /api/songs:", error);

@@ -689,6 +689,7 @@ function useMusicState() {
   };
 
   const addSongByUrl = async (mediaUrl: string, customTitle?: string) => {
+    if (!currentUser) throw new Error('Entre na sua conta para adicionar músicas.');
     setImporting(true);
     try {
       const response = await fetch('/api/songs', {

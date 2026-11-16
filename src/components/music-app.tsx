@@ -1,13 +1,13 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import { Link, useNavigate, useRouterState } from '@tanstack/react-router';
-import { Home, Search, Library, Heart, ListMusic, Radio, Plus, Link2, ChevronLeft, ChevronRight, Play, Pause, SkipBack, SkipForward, Shuffle, Repeat, Volume2, VolumeX, Music2, ArrowUpRight, MoreHorizontal, Menu, X, Trash2, Send, Users, Check, Headphones, Globe, Clock, LogOut, ThumbsUp, UserRound, ShieldCheck } from 'lucide-react';
+import { Home, Search, Library, Heart, ListMusic, Radio, Plus, Link2, ChevronLeft, ChevronRight, Play, Pause, SkipBack, SkipForward, Shuffle, Repeat, Volume2, VolumeX, Music2, ArrowUpRight, MoreHorizontal, Menu, X, Trash2, Send, Users, Check, Headphones, Globe, Clock, LogOut, ThumbsUp, UserRound } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Dialog, DialogContent, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { useMusic, type CloudTrack } from './music-provider';
 import { Artwork } from './artwork';
 import { candidates, vote, time, type Room } from '@/lib/music';
-import { AuthButton, AuthForm } from '@/components/auth-modal';
+import { AuthButton } from '@/components/auth-modal';
 import hero from '@/assets/music-cover.jpg';
 
 export function IconButton({ label, children, onClick, active, disabled, className = '' }: { label: string; children: ReactNode; onClick?: () => void; active?: boolean; disabled?: boolean; className?: string }) {
@@ -69,21 +69,14 @@ export function MusicShell({ children }: { children: ReactNode }) {
     m.setAccentColor(hex);
     return true;
   };
-  if (path === '/') {
-    if (!m.ready || !m.currentUser) {
-      return (
-        <main className="auth-page">
-          <div className="auth-page-top"><span /><Link className="auth-brand" to="/" aria-label="Votefy início"><span className="brand-mark" aria-hidden="true"><i /><i /><i /><i /></span>Votefy</Link></div>
-          <section className="auth-card" aria-labelledby="auth-title">
-            <div className="auth-card-heading"><span className="auth-icon"><Radio size={21} /></span><span className="eyebrow">Sua comunidade musical</span><h1 id="auth-title">Sua música. Sua conta.</h1><p>Entre para votar, criar salas e curtir música junto com todo mundo.</p></div>
-            {!m.ready ? <div className="auth-loading" role="status">Carregando sua conta…</div> : <AuthForm />}
-            <p className="auth-privacy"><ShieldCheck size={14} /> Acesso protegido em conexão segura</p>
-          </section>
-          <p className="auth-footer">Votefy <span>·</span> Música é melhor quando compartilhada.</p>
-        </main>
-      );
+  const requestAddSong = () => {
+    if (!m.currentUser) {
+      window.dispatchEvent(new Event('votefy:auth-required'));
+      m.setNotice('Entre na sua conta para adicionar músicas.');
+      return;
     }
-  }
+    setAddOpen(true);
+  };
 
   const track = m.tracks.find(t => t.id === m.current);
   const items = [
@@ -97,6 +90,12 @@ export function MusicShell({ children }: { children: ReactNode }) {
 
   const handleSaveLink = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!m.currentUser) {
+      setAddOpen(false);
+      window.dispatchEvent(new Event('votefy:auth-required'));
+      m.setNotice('Entre na sua conta para adicionar músicas.');
+      return;
+    }
     if (!mediaUrl.trim()) return;
     try {
       const saved = await m.addSongByUrl(mediaUrl.trim(), customTitle.trim() || undefined);
@@ -111,7 +110,7 @@ export function MusicShell({ children }: { children: ReactNode }) {
 
   return (
     <div className="app-shell">
-      <button type="button" data-open-add-song hidden onClick={() => setAddOpen(true)} />
+      <button type="button" data-open-add-song hidden onClick={requestAddSong} />
 
       <aside className={`sidebar ${mobile ? 'mobile-open' : ''}`}>
         <Link to="/" className="brand" onClick={() => setMobile(false)}>
@@ -144,7 +143,7 @@ export function MusicShell({ children }: { children: ReactNode }) {
           {!m.playlists.length && <span>Sua próxima seleção começa aqui</span>}
         </div>
         <div className="sidebar-bottom">
-          <Button className="w-full" onClick={() => setAddOpen(true)} disabled={m.importing}>
+          <Button className="w-full" onClick={requestAddSong} disabled={m.importing}>
             <Plus/>{m.importing ? 'Salvando...' : 'Adicionar música'}
           </Button>
           <div className="local-label"><Globe size={13}/>Salvo na nuvem · Neon DB</div>
@@ -178,7 +177,7 @@ export function MusicShell({ children }: { children: ReactNode }) {
             <label className="accent-input-label"><span>HEX</span><input aria-label="Código hexadecimal da cor" value={accentHex} maxLength={7} spellCheck={false} onChange={event => { setAccentHex(event.target.value); if (updateAccent(event.target.value)) setAccentRgb(hexToRgb(event.target.value)); }} onBlur={() => { const hex = parseAccentColor(accentHex); if (hex) setAccentHex(hex); else setAccentHex(m.accentColor); }} /></label>
             <label className="accent-input-label rgb-input"><span>RGB</span><input aria-label="Valores RGB da cor" value={accentRgb} spellCheck={false} onChange={event => { setAccentRgb(event.target.value); updateAccent(event.target.value); }} onBlur={() => { const hex = parseAccentColor(accentRgb); if (hex) { setAccentHex(hex); setAccentRgb(hexToRgb(hex)); } else setAccentRgb(hexToRgb(m.accentColor)); }} /></label>
           </div>
-          <Button variant="outline" className="upload-top" size="sm" onClick={() => setAddOpen(true)}>
+          <Button variant="outline" className="upload-top" size="sm" onClick={requestAddSong}>
             <Link2/>Adicionar link
           </Button>
           {m.currentUser ? (
@@ -220,7 +219,7 @@ export function MusicShell({ children }: { children: ReactNode }) {
         </div>
 
         <div className="player-center">
-          <div className="play-controls">
+          <div className="play-controls player-control-dock" role="group" aria-label="Controles de reprodução">
             <IconButton label="Aleatório" active={m.shuffle} onClick={() => m.setShuffle(!m.shuffle)} className="optional-control">
               <Shuffle size={15}/>
             </IconButton>
@@ -230,7 +229,7 @@ export function MusicShell({ children }: { children: ReactNode }) {
             <Button
               variant="ghost"
               size="icon"
-              className="main-play"
+              className="main-play muted-control"
               aria-label={m.playing ? 'Pausar' : 'Reproduzir'}
               disabled={!m.tracks.length}
               onClick={m.toggle}

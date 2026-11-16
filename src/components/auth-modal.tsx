@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Link } from '@tanstack/react-router';
 import { LogIn, LogOut, Radio, ShieldCheck, User, UserPlus } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -147,6 +147,11 @@ export function AuthForm({
 export function AuthButton() {
   const m = useMusic();
   const [open, setOpen] = useState(false);
+  useEffect(() => {
+    const openForProtectedAction = () => setOpen(true);
+    window.addEventListener('votefy:auth-required', openForProtectedAction);
+    return () => window.removeEventListener('votefy:auth-required', openForProtectedAction);
+  }, []);
 
   if (m.currentUser) {
     return (
