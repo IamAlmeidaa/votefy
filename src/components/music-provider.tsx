@@ -1,17 +1,30 @@
 import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
-import { candidates, winner, vote, type Track, type Playlist, type Room, type Participant } from '@/lib/music';
-import { createLanPeer, decodeSignal, encodeSignal, parseLanMessage, toSharedTracks, waitForCandidates, type LanMessage, type SharedTrack } from '@/lib/lan';
+import { type Track, type Playlist, type Room } from '@/lib/music';
 
-export type Membership = { role: 'host' | 'guest'; participantId: string; status: 'waiting' | 'connected' | 'disconnected'; answerCode?: string };
-export type Invite = { id: string; roomId: string; code: string; status: 'waiting' | 'connecting' | 'connected'; participantName?: string };
-type HostConnection = { id: string; roomId: string; peer: RTCPeerConnection; channel: RTCDataChannel; participant?: Participant; closed: boolean };
-type GuestConnection = { roomId: string; name: string; peer: RTCPeerConnection; channel?: RTCDataChannel; participantId: string; closed: boolean };
+export type Membership = {
+  role: 'host' | 'guest';
+  participantId: string;
+  status: 'waiting' | 'connected' | 'disconnected';
+  answerCode?: string;
+};
+export type Invite = {
+  id: string;
+  roomId: string;
+  code: string;
+  status: 'waiting' | 'connecting' | 'connected';
+  participantName?: string;
+};
 
 export type CloudTrack = Track & {
   mediaUrl: string;
   youtubeId: string | null;
   coverUrl: string | null;
   votes: number;
+};
+
+export type CurrentUser = {
+  id: string;
+  username: string;
 };
 
 interface ApiSongRecord {
@@ -59,6 +72,17 @@ declare global {
   }
 }
 
+function getOrCreateClientUserId(): string {
+  if (typeof window === 'undefined') return 'server-user';
+  const key = 'votefy_user_id';
+  let id = localStorage.getItem(key);
+  if (!id) {
+    id = crypto.randomUUID();
+    localStorage.setItem(key, id);
+  }
+  return id;
+}
+
 function mapSongToTrack(song: ApiSongRecord): CloudTrack {
   return {
     id: String(song.id),
@@ -78,20 +102,42 @@ function mapSongToTrack(song: ApiSongRecord): CloudTrack {
 }
 
 function useMusicState() {
+  const [currentUser, setCurrentUser] = useState<CurrentUser | null>(() => {
+    if (typeof window === 'undefined') return null;
+    try {
+      const saved = localStorage.getItem('votefy_auth_user');
+      return saved ? (JSON.parse(saved) as CurrentUser) : null;
+    } catch {
+      return null;
+    }
+  });
+  const [userId, setUserId] = useState<string>(() => {
+    if (typeof window !== 'undefined') {
+      try {
+        const saved = localStorage.getItem('votefy_auth_user');
+        if (saved) {
+          const parsed = JSON.parse(saved) as CurrentUser;
+          if (parsed?.id) return parsed.id;
+        }
+      } catch {
+        // fallback para UUID anônimo
+      }
+    }
+    return getOrCreateClientUserId();
+  });
   const [tracks, setTracks] = useState<CloudTrack[]>([]);
   const [playlists, setPlaylists] = useState<Playlist[]>([]);
   const [favorites, setFavorites] = useState<string[]>([]);
   const [rooms, setRooms] = useState<Room[]>([]);
   const [memberships, setMemberships] = useState<Record<string, Membership>>({});
-  const [remoteTracks, setRemoteTracks] = useState<Record<string, SharedTrack[]>>({});
-  const [invites, setInvites] = useState<Invite[]>([]);
-  const [creatingInvite, setCreatingInvite] = useState(false);
+  const [invites] = useState<Invite[]>([]);
+  const [creatingInvite] = useState(false);
   const [ready, setReady] = useState(false);
   const [current, setCurrent] = useState<string>();
   const [playing, setPlaying] = useState(false);
   const [elapsed, setElapsed] = useState(0);
   const [duration, setDuration] = useState(0);
-  const [volume, setVolume] = useState(.7);
+  const [volume, setVolume] = useState(0.7);
   const [shuffle, setShuffle] = useState(false);
   const [repeat, setRepeat] = useState(false);
   const [queue, setQueue] = useState<string[]>([]);
@@ -108,81 +154,34 @@ function useMusicState() {
   const currentRef = useRef<string | undefined>(undefined);
   const volumeRef = useRef(volume);
   const roomsRef = useRef<Room[]>([]);
-  const membershipsRef = useRef<Record<string, Membership>>({});
-  const hostConnections = useRef(new Map<string, HostConnection>());
-  const guestConnection = useRef<GuestConnection | undefined>(undefined);
+  const activeRoomRef = useRef<string | undefined>(undefined);
+  const userIdRef = useRef<string>(userId);
   const onEndedRef = useRef<() => void>(() => {});
 
   currentRef.current = current;
   volumeRef.current = volume;
+  activeRoomRef.current = activeRoom;
+  userIdRef.current = userId;
 
-  const commitRooms = (next: Room[], broadcast = true) => {
+  const upsertRoomInState = (room: Room) => {
+    const activeUserId = userIdRef.current;
+    const next = [...roomsRef.current.filter(r => r.id !== room.id), room];
     roomsRef.current = next;
     setRooms(next);
-    if (broadcast) for (const room of next) if (membershipsRef.current[room.id]?.role === 'host') broadcastRoom(room.id);
-  };
-  const setRoomsCompat = (updater: Room[] | ((prev: Room[]) => Room[])) => {
-    const next = typeof updater === 'function' ? updater(roomsRef.current) : updater;
-    commitRooms(next);
-  };
-  const commitMemberships = (next: Record<string, Membership>) => {
-    membershipsRef.current = next;
-    setMemberships(next);
-  };
-  const patchMembership = (roomId: string, patch: Partial<Membership>) => {
-    const previous = membershipsRef.current[roomId];
-    if (previous) commitMemberships({ ...membershipsRef.current, [roomId]: { ...previous, ...patch } });
-  };
-  const send = (channel: RTCDataChannel | undefined, message: LanMessage) => {
-    if (channel?.readyState === 'open') channel.send(JSON.stringify(message));
-  };
-  function broadcastRoom(roomId: string) {
-    const room = roomsRef.current.find(item => item.id === roomId);
-    if (!room || membershipsRef.current[roomId]?.role !== 'host') return;
-    const message: LanMessage = { type: 'snapshot', room, tracks: toSharedTracks(tracksRef.current) };
-    for (const connection of hostConnections.current.values()) if (connection.roomId === roomId && connection.participant) send(connection.channel, message);
-  }
-  const updateRoom = (id: string, change: (room: Room) => Room) => {
-    const room = roomsRef.current.find(item => item.id === id);
-    if (!room) return;
-    const changed = change(room);
-    if (changed === room) return;
-    commitRooms(roomsRef.current.map(item => item.id === id ? changed : item));
-  };
-  const cleanupHostConnection = (connection: HostConnection) => {
-    if (connection.closed) return;
-    connection.closed = true;
-    hostConnections.current.delete(connection.id);
-    setInvites(all => all.filter(invite => invite.id !== connection.id));
-    const participant = connection.participant;
-    connection.channel.onmessage = null;
-    connection.channel.onclose = null;
-    connection.peer.onconnectionstatechange = null;
-    try { connection.channel.close(); connection.peer.close(); } catch { /* Already closed. */ }
-    if (participant) updateRoom(connection.roomId, room => ({ ...room, participants: room.participants.filter(person => person.id !== participant.id), votes: Object.fromEntries(Object.entries(room.votes).filter(([person]) => person !== participant.id)) }));
-  };
-  const handleHostMessage = (connection: HostConnection, raw: unknown) => {
-    const message = parseLanMessage(raw);
-    if (!message) return;
-    if (message.type === 'hello') {
-      if (connection.participant || connection.closed) return;
-      const participant = { id: crypto.randomUUID(), name: String(message.name).trim().slice(0, 40) || 'Convidado' };
-      connection.participant = participant;
-      setInvites(all => all.map(invite => invite.id === connection.id ? { ...invite, status: 'connected', participantName: participant.name } : invite));
-      send(connection.channel, { type: 'welcome', participantId: participant.id });
-      updateRoom(connection.roomId, room => ({ ...room, participants: [...room.participants.filter(person => person.id !== participant.id), participant] }));
-      return;
+
+    const me = room.participants.find(p => p.id === activeUserId);
+    if (me) {
+      setMemberships(prev => ({
+        ...prev,
+        [room.id]: {
+          role: room.admin === activeUserId ? 'host' : 'guest',
+          participantId: activeUserId,
+          status: 'connected',
+        },
+      }));
     }
-    if (!connection.participant) return;
-    if (message.type === 'vote') updateRoom(connection.roomId, room => vote(room, connection.participant!.id, String(message.track), tracksRef.current.map(track => track.id)));
-    if (message.type === 'chat') {
-      const text = String(message.text).trim().slice(0, 500);
-      if (text) updateRoom(connection.roomId, room => ({ ...room, chat: [...room.chat, { name: connection.participant!.name, text }].slice(-100) }));
-    }
-    if (message.type === 'leave') cleanupHostConnection(connection);
   };
 
-  // Carrega músicas salvas na Neon
   const refreshTracks = async () => {
     try {
       const response = await fetch('/api/songs');
@@ -194,11 +193,112 @@ function useMusicState() {
         setTracks(mapped);
       }
     } catch {
-      // Silencia falhas temporárias de rede no polling
+      // Silencia falhas temporárias
     }
   };
 
-  // Inicializa YouTube IFrame API para streaming direto
+  const refreshRooms = async () => {
+    try {
+      const activeUserId = userIdRef.current;
+      const response = await fetch(`/api/rooms?userId=${encodeURIComponent(activeUserId)}`);
+      if (!response.ok) return;
+      const data = (await response.json()) as Room[];
+      if (Array.isArray(data)) {
+        roomsRef.current = data;
+        setRooms(data);
+        const nextMemberships: Record<string, Membership> = {};
+        for (const room of data) {
+          if (room.participants.some(p => p.id === activeUserId)) {
+            nextMemberships[room.id] = {
+              role: room.admin === activeUserId ? 'host' : 'guest',
+              participantId: activeUserId,
+              status: 'connected',
+            };
+          }
+        }
+        setMemberships(nextMemberships);
+      }
+    } catch {
+      // Silencia falhas temporárias
+    }
+  };
+
+  const syncRoom = async (roomId: string): Promise<Room | null> => {
+    try {
+      const activeUserId = userIdRef.current;
+      const response = await fetch(
+        `/api/rooms?roomId=${encodeURIComponent(roomId)}&userId=${encodeURIComponent(activeUserId)}`
+      );
+      if (!response.ok) return null;
+      const room = (await response.json()) as Room;
+      upsertRoomInState(room);
+
+      if (
+        room.admin === activeUserId &&
+        activeRoomRef.current === room.id &&
+        room.current &&
+        room.current !== currentRef.current
+      ) {
+        playLocalAudio(room.current, room.id);
+      }
+
+      return room;
+    } catch {
+      return null;
+    }
+  };
+
+  // --- AUTENTICAÇÃO (NEON POSTGRES) ---
+  const login = async (username: string, password: string) => {
+    const response = await fetch('/api/auth', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'login', username, password }),
+    });
+    const payload = (await response.json()) as CurrentUser & { error?: string };
+    if (!response.ok) {
+      throw new Error(payload.error || 'Não foi possível entrar.');
+    }
+    const session: CurrentUser = { id: payload.id, username: payload.username };
+    localStorage.setItem('votefy_auth_user', JSON.stringify(session));
+    setCurrentUser(session);
+    setUserId(session.id);
+    userIdRef.current = session.id;
+    setNotice(`Bem-vindo de volta, ${session.username}!`);
+    void refreshRooms();
+    return session;
+  };
+
+  const register = async (username: string, password: string, confirmPassword: string) => {
+    const response = await fetch('/api/auth', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'register', username, password, confirmPassword }),
+    });
+    const payload = (await response.json()) as CurrentUser & { error?: string };
+    if (!response.ok) {
+      throw new Error(payload.error || 'Não foi possível criar a conta.');
+    }
+    const session: CurrentUser = { id: payload.id, username: payload.username };
+    localStorage.setItem('votefy_auth_user', JSON.stringify(session));
+    setCurrentUser(session);
+    setUserId(session.id);
+    userIdRef.current = session.id;
+    setNotice(`Conta criada! Você entrou como ${session.username}.`);
+    void refreshRooms();
+    return session;
+  };
+
+  const logout = () => {
+    localStorage.removeItem('votefy_auth_user');
+    const guestId = getOrCreateClientUserId();
+    setCurrentUser(null);
+    setUserId(guestId);
+    userIdRef.current = guestId;
+    setNotice('Você saiu da sua conta.');
+    void refreshRooms();
+  };
+
   useEffect(() => {
     const createPlayer = () => {
       if (!window.YT?.Player || ytPlayer.current || !document.getElementById('votefy-yt-player')) return;
@@ -221,7 +321,7 @@ function useMusicState() {
               pendingYtId.current = null;
             }
           },
-          onStateChange: (event) => {
+          onStateChange: event => {
             if (event.data === 1) setPlaying(true);
             if (event.data === 2) setPlaying(false);
             if (event.data === 0) onEndedRef.current();
@@ -246,7 +346,6 @@ function useMusicState() {
     }
   }, []);
 
-  // Atualiza barra de progresso durante streaming do YouTube
   useEffect(() => {
     const activeTrack = tracks.find(t => t.id === current);
     if (!playing || !activeTrack?.youtubeId) return;
@@ -274,24 +373,23 @@ function useMusicState() {
       const state = JSON.parse(localStorage.getItem('onda-state') || '{}');
       setPlaylists(state.playlists || []);
       setFavorites(state.favorites || []);
-      setVolume(state.volume ?? .7);
+      setVolume(state.volume ?? 0.7);
       setShuffle(state.shuffle || false);
       setRepeat(state.repeat || false);
     } catch {
       setNotice('Não foi possível recuperar as preferências salvas.');
     }
 
-    refreshTracks().finally(() => setReady(true));
+    Promise.all([refreshTracks(), refreshRooms()]).finally(() => setReady(true));
     const syncInterval = setInterval(() => {
       void refreshTracks();
+      void refreshRooms();
     }, 5000);
 
     return () => {
       clearInterval(syncInterval);
       element.pause();
       element.src = '';
-      for (const connection of hostConnections.current.values()) { connection.closed = true; connection.peer.close(); }
-      if (guestConnection.current) { guestConnection.current.closed = true; guestConnection.current.peer.close(); }
     };
   }, []);
 
@@ -312,7 +410,6 @@ function useMusicState() {
 
   useEffect(() => {
     tracksRef.current = tracks;
-    for (const room of roomsRef.current) broadcastRoom(room.id);
   }, [tracks]);
 
   useEffect(() => {
@@ -323,18 +420,19 @@ function useMusicState() {
     return undefined;
   }, [notice]);
 
-  const play = (id: string, ids?: string[], roomId?: string) => {
+  const playLocalAudio = (id: string, roomId?: string, ids?: string[]) => {
     const track = tracksRef.current.find(item => item.id === id);
     if (!track) return;
     playbackVersion.current++;
     const version = playbackVersion.current;
 
     setCurrent(id);
+    currentRef.current = id;
     setElapsed(0);
     setDuration(track.duration || 0);
     setActiveRoom(roomId);
+    activeRoomRef.current = roomId;
     if (ids) setQueue(ids);
-    if (roomId) updateRoom(roomId, room => ({ ...room, current: id, options: candidates(tracksRef.current.map(item => item.id), id), votes: {}, open: true }));
 
     if (track.youtubeId) {
       audio.current?.pause();
@@ -346,7 +444,11 @@ function useMusicState() {
       setPlaying(true);
     } else if (audio.current) {
       if (ytPlayer.current && ytReady.current) {
-        try { ytPlayer.current.pauseVideo(); } catch { /* ignore */ }
+        try {
+          ytPlayer.current.pauseVideo();
+        } catch {
+          /* ignore */
+        }
       }
       audio.current.src = track.mediaUrl;
       audio.current.play().catch(error => {
@@ -357,29 +459,57 @@ function useMusicState() {
     }
   };
 
-  const finishRound = (id: string, manual?: string) => {
-    const room = roomsRef.current.find(item => item.id === id);
-    if (!room) return;
-    const next = manual || room.queue.find(trackId => tracksRef.current.some(track => track.id === trackId)) || winner(room, tracksRef.current.map(track => track.id));
-    if (!next) { setNotice('Adicione mais músicas para iniciar outra rodada.'); return; }
-    const count = Object.values(room.votes).filter(value => value === next).length;
-    updateRoom(id, currentRoom => ({ ...currentRoom, history: [...currentRoom.history, { track: next, votes: count }], queue: currentRoom.queue.filter(trackId => trackId !== next), open: false }));
-    play(next, undefined, id);
+  const play = (id: string, ids?: string[], roomId?: string) => {
+    playLocalAudio(id, roomId, ids);
+    if (roomId) {
+      void fetch('/api/rooms', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'next', roomId, trackId: id }),
+      })
+        .then(r => (r.ok ? r.json() : null))
+        .then((updated: Room | null) => {
+          if (updated) upsertRoomInState(updated);
+        });
+    }
+  };
+
+  const finishRound = async (id: string, manual?: string) => {
+    const response = await fetch('/api/rooms', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'next', roomId: id, trackId: manual }),
+    });
+    const payload = (await response.json()) as Room & { error?: string };
+    if (!response.ok) {
+      setNotice(payload.error || 'Adicione mais músicas para iniciar outra rodada.');
+      return;
+    }
+    upsertRoomInState(payload);
+    if (payload.current && payload.admin === userIdRef.current) {
+      playLocalAudio(payload.current, id);
+    }
   };
 
   const skip = (direction = 1) => {
-    if (activeRoom && direction === 1) { finishRound(activeRoom); return; }
-    const ids = (queue.length ? queue : tracksRef.current.map(track => track.id)).filter(id => tracksRef.current.some(track => track.id === id));
+    if (activeRoom && direction === 1) {
+      void finishRound(activeRoom);
+      return;
+    }
+    const ids = (queue.length ? queue : tracksRef.current.map(track => track.id)).filter(id =>
+      tracksRef.current.some(track => track.id === id)
+    );
     if (!ids.length) return;
     const index = ids.indexOf(currentRef.current || '');
-    const next = ids[shuffle ? Math.floor(Math.random() * ids.length) : (index + direction + ids.length) % ids.length];
+    const next =
+      ids[shuffle ? Math.floor(Math.random() * ids.length) : (index + direction + ids.length) % ids.length];
     if (next) play(next, ids);
   };
 
   onEndedRef.current = () => {
     const activeTrack = tracksRef.current.find(t => t.id === currentRef.current);
     if (activeRoom) {
-      finishRound(activeRoom);
+      void finishRound(activeRoom);
     } else if (repeat) {
       if (activeTrack?.youtubeId && ytPlayer.current && ytReady.current) {
         ytPlayer.current.seekTo(0, true);
@@ -427,7 +557,6 @@ function useMusicState() {
     }
   };
 
-  // Salva nova música por link na Neon para todos os usuários ouvirem
   const addSongByUrl = async (mediaUrl: string, customTitle?: string) => {
     setImporting(true);
     try {
@@ -455,7 +584,6 @@ function useMusicState() {
     }
   };
 
-  // Registra voto na Neon
   const voteSong = async (id: string) => {
     try {
       const response = await fetch('/api/songs', {
@@ -484,155 +612,171 @@ function useMusicState() {
     if (current === id) {
       audio.current?.pause();
       if (ytPlayer.current && ytReady.current) {
-        try { ytPlayer.current.stopVideo(); } catch { /* ignore */ }
+        try {
+          ytPlayer.current.stopVideo();
+        } catch {
+          /* ignore */
+        }
       }
       setCurrent(undefined);
       setPlaying(false);
     }
   };
 
-  const favorite = (id: string) => setFavorites(all => all.includes(id) ? all.filter(trackId => trackId !== id) : [...all, id]);
+  const favorite = (id: string) =>
+    setFavorites(all => (all.includes(id) ? all.filter(trackId => trackId !== id) : [...all, id]));
 
-  const createRoom = (name: string, hostName: string) => {
-    const participantId = crypto.randomUUID();
-    const id = crypto.randomUUID().slice(0, 8).toUpperCase();
-    const room: Room = { id, name: name.trim(), admin: participantId, active: participantId, participants: [{ id: participantId, name: hostName.trim() }], options: [], votes: {}, open: true, queue: [], history: [], chat: [] };
-    commitMemberships({ ...membershipsRef.current, [id]: { role: 'host', participantId, status: 'connected' } });
-    commitRooms([...roomsRef.current, room], false);
-    return id;
+  // --- SALAS MUSICAIS (NEON POSTGRES) ---
+  const createRoom = async (name: string, hostName: string) => {
+    const response = await fetch('/api/rooms', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'create', name, userId: userIdRef.current, userName: hostName }),
+    });
+    const payload = (await response.json()) as Room & { error?: string };
+    if (!response.ok) throw new Error(payload.error || 'Erro ao criar sala.');
+    upsertRoomInState(payload);
+    return payload.id;
   };
-  const createInvite = async (roomId: string) => {
-    if (membershipsRef.current[roomId]?.role !== 'host') throw new Error('Somente o host pode criar convites.');
-    setCreatingInvite(true);
-    const peer = createLanPeer();
-    const id = crypto.randomUUID();
-    const channel = peer.createDataChannel('votefy-lan');
-    const connection: HostConnection = { id, roomId, peer, channel, closed: false };
-    hostConnections.current.set(id, connection);
-    channel.onmessage = event => handleHostMessage(connection, event.data);
-    channel.onclose = () => cleanupHostConnection(connection);
-    peer.onconnectionstatechange = () => { if (['failed', 'closed'].includes(peer.connectionState)) cleanupHostConnection(connection); };
-    try {
-      await peer.setLocalDescription(await peer.createOffer());
-      await waitForCandidates(peer);
-      if (!peer.localDescription) throw new Error('Não foi possível preparar a conexão local.');
-      const code = encodeSignal(roomId, peer.localDescription);
-      setInvites(all => [...all, { id, roomId, code, status: 'waiting' }]);
-      return code;
-    } catch (error) {
-      cleanupHostConnection(connection);
-      throw error;
-    } finally { setCreatingInvite(false); }
-  };
-  const acceptAnswer = async (inviteId: string, code: string) => {
-    const connection = hostConnections.current.get(inviteId);
-    if (!connection) throw new Error('Este convite não está mais disponível.');
-    const signal = decodeSignal(code, 'answer');
-    if (signal.room !== connection.roomId) throw new Error('Esta resposta pertence a outra sala.');
-    await connection.peer.setRemoteDescription(signal.description);
-    setInvites(all => all.map(invite => invite.id === inviteId ? { ...invite, status: 'connecting' } : invite));
-  };
+
   const joinRoom = async (code: string, name: string) => {
-    const signal = decodeSignal(code, 'offer');
-    if (guestConnection.current) {
-      const previous = guestConnection.current;
-      previous.closed = true;
-      previous.peer.close();
+    const response = await fetch('/api/rooms', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'join', roomId: code, userId: userIdRef.current, userName: name }),
+    });
+    const payload = (await response.json()) as Room & { error?: string };
+    if (!response.ok) throw new Error(payload.error || 'Não foi possível entrar na sala.');
+    upsertRoomInState(payload);
+    return { roomId: payload.id };
+  };
+
+  const castVote = async (roomId: string, trackId: string, isGolden = false) => {
+    const response = await fetch('/api/rooms', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'vote', roomId, userId: userIdRef.current, trackId, isGolden }),
+    });
+    const payload = (await response.json()) as Room & { error?: string };
+    if (!response.ok) {
+      setNotice(payload.error || 'Não foi possível votar.');
+      return;
     }
-    const peer = createLanPeer();
-    const connection: GuestConnection = { roomId: signal.room, name: name.trim().slice(0, 40), peer, participantId: '', closed: false };
-    guestConnection.current = connection;
-    commitMemberships({ ...membershipsRef.current, [signal.room]: { role: 'guest', participantId: '', status: 'waiting' } });
-    const placeholder: Room = { id: signal.room, name: 'Sala do host', admin: '', active: '', participants: [], options: [], votes: {}, open: false, queue: [], history: [], chat: [] };
-    commitRooms([...roomsRef.current.filter(room => room.id !== signal.room), placeholder], false);
-    peer.ondatachannel = event => {
-      connection.channel = event.channel;
-      event.channel.onopen = () => send(event.channel, { type: 'hello', name: connection.name });
-      event.channel.onmessage = messageEvent => {
-        const message = parseLanMessage(messageEvent.data);
-        if (!message) return;
-        if (message.type === 'welcome') {
-          connection.participantId = message.participantId;
-          patchMembership(signal.room, { participantId: message.participantId, status: 'connected' });
-        }
-        if (message.type === 'snapshot' && message.room?.id === signal.room && Array.isArray(message.tracks)) {
-          commitRooms([...roomsRef.current.filter(room => room.id !== signal.room), message.room], false);
-          setRemoteTracks(all => ({ ...all, [signal.room]: message.tracks }));
-          if (connection.participantId) patchMembership(signal.room, { status: 'connected' });
-        }
-      };
-      event.channel.onclose = () => { if (!connection.closed) patchMembership(signal.room, { status: 'disconnected' }); };
-    };
-    peer.onconnectionstatechange = () => { if (['failed', 'closed'].includes(peer.connectionState) && !connection.closed) patchMembership(signal.room, { status: 'disconnected' }); };
-    try {
-      await peer.setRemoteDescription(signal.description);
-      await peer.setLocalDescription(await peer.createAnswer());
-      await waitForCandidates(peer);
-      if (!peer.localDescription) throw new Error('Não foi possível preparar sua resposta.');
-      const answer = encodeSignal(signal.room, peer.localDescription);
-      patchMembership(signal.room, { answerCode: answer });
-      return { roomId: signal.room, answer };
-    } catch (error) {
-      connection.closed = true;
-      peer.close();
-      throw error;
+    upsertRoomInState(payload);
+    if (isGolden) setNotice('Voto de Ouro (+3) aplicado!');
+  };
+
+  const voteSkip = async (roomId: string) => {
+    const response = await fetch('/api/rooms', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'skipVote', roomId, userId: userIdRef.current }),
+    });
+    const payload = (await response.json()) as { room: Room; skipped: boolean; error?: string };
+    if (!response.ok) {
+      setNotice(payload.error || 'Não foi possível registrar o voto de skip.');
+      return;
+    }
+    upsertRoomInState(payload.room);
+    if (payload.skipped) {
+      setNotice('70% atingido! Pulando para a próxima música...');
+      if (payload.room.admin === userIdRef.current && activeRoomRef.current === roomId && payload.room.current) {
+        playLocalAudio(payload.room.current, roomId);
+      }
     }
   };
-  const castVote = (roomId: string, trackId: string) => {
-    const membership = membershipsRef.current[roomId];
-    if (membership?.role === 'host') updateRoom(roomId, room => vote(room, membership.participantId, trackId, tracksRef.current.map(track => track.id)));
-    else if (membership?.role === 'guest' && membership.status === 'connected') send(guestConnection.current?.channel, { type: 'vote', track: trackId });
+
+  const controlRoom = async (
+    roomId: string,
+    patch: {
+      open?: boolean;
+      rerollOptions?: boolean;
+      clearVotes?: boolean;
+      addToQueue?: string;
+      removeFromQueueIndex?: number;
+    }
+  ) => {
+    const response = await fetch('/api/rooms', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'controls', roomId, patch }),
+    });
+    const payload = (await response.json()) as Room & { error?: string };
+    if (!response.ok) {
+      setNotice(payload.error || 'Erro ao atualizar controles da sala.');
+      return;
+    }
+    upsertRoomInState(payload);
   };
-  const sendChat = (roomId: string, value: string) => {
+
+  const sendChat = async (roomId: string, value: string) => {
     const text = value.trim().slice(0, 500);
-    const membership = membershipsRef.current[roomId];
-    if (!text || !membership) return;
-    if (membership.role === 'host') {
-      const name = roomsRef.current.find(room => room.id === roomId)?.participants.find(person => person.id === membership.participantId)?.name || 'Host';
-      updateRoom(roomId, room => ({ ...room, chat: [...room.chat, { name, text }].slice(-100) }));
-    } else if (membership.status === 'connected') send(guestConnection.current?.channel, { type: 'chat', text });
+    if (!text) return;
+    const response = await fetch('/api/rooms', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'chat', roomId, userId: userIdRef.current, text }),
+    });
+    const payload = (await response.json()) as Room & { error?: string };
+    if (response.ok) upsertRoomInState(payload);
   };
-  const removeParticipant = (roomId: string, participantId: string) => {
-    if (membershipsRef.current[roomId]?.role !== 'host') return;
-    for (const connection of hostConnections.current.values()) if (connection.roomId === roomId && connection.participant?.id === participantId) cleanupHostConnection(connection);
+
+  const removeParticipant = async (roomId: string, participantId: string) => {
+    await fetch('/api/rooms', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'leave', roomId, userId: userIdRef.current, targetUserId: participantId }),
+    });
+    await syncRoom(roomId);
   };
-  const leaveRoom = (roomId: string) => {
-    const membership = membershipsRef.current[roomId];
-    if (membership?.role !== 'guest') return;
-    const connection = guestConnection.current;
-    if (connection?.roomId === roomId) {
-      send(connection.channel, { type: 'leave' });
-      connection.closed = true;
-      connection.peer.close();
-      guestConnection.current = undefined;
+
+  const leaveRoom = async (roomId: string) => {
+    await fetch('/api/rooms', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'leave', roomId, userId: userIdRef.current }),
+    });
+    setMemberships(prev => {
+      const next = { ...prev };
+      delete next[roomId];
+      return next;
+    });
+    setRooms(prev => prev.filter(r => r.id !== roomId));
+  };
+
+  const closeRoom = async (roomId: string) => {
+    await fetch('/api/rooms', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'close', roomId, userId: userIdRef.current }),
+    });
+    setMemberships(prev => {
+      const next = { ...prev };
+      delete next[roomId];
+      return next;
+    });
+    setRooms(prev => prev.filter(r => r.id !== roomId));
+    if (activeRoom === roomId) {
+      audio.current?.pause();
+      setActiveRoom(undefined);
     }
-    const nextMemberships = { ...membershipsRef.current };
-    delete nextMemberships[roomId];
-    commitMemberships(nextMemberships);
-    commitRooms(roomsRef.current.filter(room => room.id !== roomId), false);
-    setRemoteTracks(all => { const next = { ...all }; delete next[roomId]; return next; });
-  };
-  const closeRoom = (roomId: string) => {
-    if (membershipsRef.current[roomId]?.role !== 'host') return;
-    for (const connection of [...hostConnections.current.values()]) if (connection.roomId === roomId) cleanupHostConnection(connection);
-    const nextMemberships = { ...membershipsRef.current };
-    delete nextMemberships[roomId];
-    commitMemberships(nextMemberships);
-    setInvites(all => all.filter(invite => invite.roomId !== roomId));
-    commitRooms(roomsRef.current.filter(room => room.id !== roomId), false);
-    if (activeRoom === roomId) { audio.current?.pause(); setActiveRoom(undefined); }
   };
 
   return {
+    userId,
+    currentUser,
+    login,
+    register,
+    logout,
     tracks,
     playlists,
     setPlaylists,
     favorites,
     favorite,
     rooms,
-    setRooms: setRoomsCompat,
+    setRooms,
     memberships,
-    remoteTracks,
+    remoteTracks: {} as Record<string, CloudTrack[]>,
     invites,
     creatingInvite,
     ready,
@@ -660,12 +804,14 @@ function useMusicState() {
     activeRoom,
     setActiveRoom,
     finishRound,
-    updateRoom,
+    syncRoom,
+    controlRoom,
     createRoom,
-    createInvite,
-    acceptAnswer,
+    createInvite: async () => '',
+    acceptAnswer: async () => {},
     joinRoom,
     castVote,
+    voteSkip,
     sendChat,
     removeParticipant,
     leaveRoom,
@@ -675,10 +821,12 @@ function useMusicState() {
 
 type MusicState = ReturnType<typeof useMusicState>;
 const MusicContext = createContext<MusicState | null>(null);
+
 export function MusicProvider({ children }: { children: ReactNode }) {
   const state = useMusicState();
   return <MusicContext.Provider value={state}>{children}</MusicContext.Provider>;
 }
+
 export function useMusic() {
   const state = useContext(MusicContext);
   if (!state) throw new Error('Music provider missing');

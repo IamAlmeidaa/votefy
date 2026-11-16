@@ -12,9 +12,12 @@ import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as FavoritesRouteImport } from './routes/favorites'
 import { Route as LibraryRouteImport } from './routes/library'
+import { Route as LoginRouteImport } from './routes/login'
 import { Route as PlaylistsRouteImport } from './routes/playlists'
 import { Route as RoomsRouteImport } from './routes/rooms'
 import { Route as SearchRouteImport } from './routes/search'
+import { Route as ApiAuthRouteImport } from './routes/api.auth'
+import { Route as ApiRoomsRouteImport } from './routes/api.rooms'
 import { Route as ApiSongsRouteImport } from './routes/api.songs'
 import { Route as PlaylistsIndexRouteImport } from './routes/playlists.index'
 import { Route as PlaylistsPlaylistIdRouteImport } from './routes/playlists.$playlistId'
@@ -37,6 +40,11 @@ const LibraryRoute = LibraryRouteImport.update({
   path: '/library',
   getParentRoute: () => rootRouteImport,
 } as any)
+const LoginRoute = LoginRouteImport.update({
+  id: '/login',
+  path: '/login',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const PlaylistsRoute = PlaylistsRouteImport.update({
   id: '/playlists',
   path: '/playlists',
@@ -50,6 +58,16 @@ const RoomsRoute = RoomsRouteImport.update({
 const SearchRoute = SearchRouteImport.update({
   id: '/search',
   path: '/search',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiAuthRoute = ApiAuthRouteImport.update({
+  id: '/api/auth',
+  path: '/api/auth',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiRoomsRoute = ApiRoomsRouteImport.update({
+  id: '/api/rooms',
+  path: '/api/rooms',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ApiSongsRoute = ApiSongsRouteImport.update({
@@ -87,9 +105,12 @@ export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/favorites': typeof FavoritesRoute
   '/library': typeof LibraryRoute
+  '/login': typeof LoginRoute
   '/playlists': typeof PlaylistsRouteWithChildren
   '/rooms': typeof RoomsRouteWithChildren
   '/search': typeof SearchRoute
+  '/api/auth': typeof ApiAuthRoute
+  '/api/rooms': typeof ApiRoomsRoute
   '/api/songs': typeof ApiSongsRoute
   '/playlists/$playlistId': typeof PlaylistsPlaylistIdRoute
   '/rooms/$roomId': typeof RoomsRoomIdRoute
@@ -101,7 +122,10 @@ export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/favorites': typeof FavoritesRoute
   '/library': typeof LibraryRoute
+  '/login': typeof LoginRoute
   '/search': typeof SearchRoute
+  '/api/auth': typeof ApiAuthRoute
+  '/api/rooms': typeof ApiRoomsRoute
   '/api/songs': typeof ApiSongsRoute
   '/playlists/$playlistId': typeof PlaylistsPlaylistIdRoute
   '/rooms/$roomId': typeof RoomsRoomIdRoute
@@ -114,9 +138,12 @@ export interface FileRoutesById {
   '/': typeof IndexRoute
   '/favorites': typeof FavoritesRoute
   '/library': typeof LibraryRoute
+  '/login': typeof LoginRoute
   '/playlists': typeof PlaylistsRouteWithChildren
   '/rooms': typeof RoomsRouteWithChildren
   '/search': typeof SearchRoute
+  '/api/auth': typeof ApiAuthRoute
+  '/api/rooms': typeof ApiRoomsRoute
   '/api/songs': typeof ApiSongsRoute
   '/playlists/$playlistId': typeof PlaylistsPlaylistIdRoute
   '/rooms/$roomId': typeof RoomsRoomIdRoute
@@ -130,9 +157,12 @@ export interface FileRouteTypes {
     | '/'
     | '/favorites'
     | '/library'
+    | '/login'
     | '/playlists'
     | '/rooms'
     | '/search'
+    | '/api/auth'
+    | '/api/rooms'
     | '/api/songs'
     | '/playlists/$playlistId'
     | '/rooms/$roomId'
@@ -144,7 +174,10 @@ export interface FileRouteTypes {
     | '/'
     | '/favorites'
     | '/library'
+    | '/login'
     | '/search'
+    | '/api/auth'
+    | '/api/rooms'
     | '/api/songs'
     | '/playlists/$playlistId'
     | '/rooms/$roomId'
@@ -156,9 +189,12 @@ export interface FileRouteTypes {
     | '/'
     | '/favorites'
     | '/library'
+    | '/login'
     | '/playlists'
     | '/rooms'
     | '/search'
+    | '/api/auth'
+    | '/api/rooms'
     | '/api/songs'
     | '/playlists/$playlistId'
     | '/rooms/$roomId'
@@ -171,9 +207,12 @@ export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   FavoritesRoute: typeof FavoritesRoute
   LibraryRoute: typeof LibraryRoute
+  LoginRoute: typeof LoginRoute
   PlaylistsRoute: typeof PlaylistsRouteWithChildren
   RoomsRoute: typeof RoomsRouteWithChildren
   SearchRoute: typeof SearchRoute
+  ApiAuthRoute: typeof ApiAuthRoute
+  ApiRoomsRoute: typeof ApiRoomsRoute
   ApiSongsRoute: typeof ApiSongsRoute
   ApiHealthDbRoute: typeof ApiHealthDbRoute
 }
@@ -201,6 +240,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof LibraryRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/login': {
+      id: '/login'
+      path: '/login'
+      fullPath: '/login'
+      preLoaderRoute: typeof LoginRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/playlists': {
       id: '/playlists'
       path: '/playlists'
@@ -220,6 +266,20 @@ declare module '@tanstack/react-router' {
       path: '/search'
       fullPath: '/search'
       preLoaderRoute: typeof SearchRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/auth': {
+      id: '/api/auth'
+      path: '/api/auth'
+      fullPath: '/api/auth'
+      preLoaderRoute: typeof ApiAuthRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/rooms': {
+      id: '/api/rooms'
+      path: '/api/rooms'
+      fullPath: '/api/rooms'
+      preLoaderRoute: typeof ApiRoomsRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/api/songs': {
@@ -297,9 +357,12 @@ const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   FavoritesRoute: FavoritesRoute,
   LibraryRoute: LibraryRoute,
+  LoginRoute: LoginRoute,
   PlaylistsRoute: PlaylistsRouteWithChildren,
   RoomsRoute: RoomsRouteWithChildren,
   SearchRoute: SearchRoute,
+  ApiAuthRoute: ApiAuthRoute,
+  ApiRoomsRoute: ApiRoomsRoute,
   ApiSongsRoute: ApiSongsRoute,
   ApiHealthDbRoute: ApiHealthDbRoute,
 }
