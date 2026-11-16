@@ -77,6 +77,20 @@ export async function createSong(
     } catch {
       // Mantém padrão
     }
+  } else {
+    try {
+      const spotifyUrl = new URL(mediaUrl);
+      if (spotifyUrl.protocol === "https:" && spotifyUrl.hostname === "open.spotify.com" && /\/(track|album|playlist|episode|show)\/[^/]+/.test(spotifyUrl.pathname)) {
+        const response = await fetch(`https://open.spotify.com/oembed?url=${encodeURIComponent(spotifyUrl.toString())}`, { signal: AbortSignal.timeout(4000) });
+        if (response.ok) {
+          const metadata = (await response.json()) as { title?: string; thumbnail_url?: string };
+          if (!customTitle && metadata.title) title = metadata.title;
+          if (metadata.thumbnail_url && new URL(metadata.thumbnail_url).hostname === "i.scdn.co") coverUrl = metadata.thumbnail_url;
+        }
+      }
+    } catch {
+      // Links externos continuam salvos mesmo se a prévia não estiver disponível.
+    }
   }
 
   const rows = await sql`

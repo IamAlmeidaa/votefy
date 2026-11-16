@@ -18,6 +18,7 @@ export type Invite = {
 export type CloudTrack = Track & {
   mediaUrl: string;
   youtubeId: string | null;
+  spotifyUri: string | null;
   coverUrl: string | null;
   votes: number;
 };
@@ -50,6 +51,19 @@ interface YTPlayerInstance {
   destroy: () => void;
 }
 
+interface SpotifyEmbedController {
+  loadUri: (uri: string) => void;
+  loadEntity: (uri: string) => void;
+  play: () => void;
+  pause: () => void;
+  seek: (milliseconds: number) => void;
+  addListener: (event: string, callback: (event: { data: { isPaused?: boolean; duration?: number; position?: number } }) => void) => void;
+}
+
+interface SpotifyIframeApi {
+  createController: (element: HTMLElement, options: { uri: string; width?: string; height?: string }, callback: (controller: SpotifyEmbedController) => void) => void;
+}
+
 declare global {
   interface Window {
     YT?: {
@@ -69,6 +83,7 @@ declare global {
       ) => YTPlayerInstance;
     };
     onYouTubeIframeAPIReady?: () => void;
+    onSpotifyIframeApiReady?: (api: SpotifyIframeApi) => void;
   }
 }
 
@@ -84,6 +99,7 @@ function getOrCreateClientUserId(): string {
 }
 
 function mapSongToTrack(song: ApiSongRecord): CloudTrack {
+  const spotifyMatch = song.media_url.match(/^https?:\/\/open\.spotify\.com\/(?:intl-[a-z-]+\/)?(track|album|playlist|episode|show)\/([A-Za-z0-9]+)(?:[/?#]|$)/i);
   return {
     id: String(song.id),
     title: song.title || 'Música da Comunidade',
@@ -96,6 +112,7 @@ function mapSongToTrack(song: ApiSongRecord): CloudTrack {
     added: song.created_at ? new Date(song.created_at).getTime() : Date.now(),
     mediaUrl: song.media_url,
     youtubeId: song.youtube_id,
+    spotifyUri: spotifyMatch ? `spotify:${spotifyMatch[1]!.toLowerCase()}:${spotifyMatch[2]}` : null,
     coverUrl: song.cover_url,
     votes: Number(song.votes) || 1,
   };
@@ -128,6 +145,12 @@ function useMusicState() {
   const ytPlayer = useRef<YTPlayerInstance | null>(null);
   const ytReady = useRef(false);
   const pendingYtId = useRef<string | null>(null);
+  const spotifyApi = useRef<SpotifyIframeApi | null>(null);
+  const spotifyController = useRef<SpotifyEmbedController | null>(null);
+  const spotifyLoadedUri = useRef<string | null>(null);
+  const pendingSpotifyUri = useRef<string | null>(null);
+  const pendingSpotifyPlay = useRef(false);
+  const spotifyEndedUri = useRef<string | null>(null);
   const playbackVersion = useRef(0);
   const tracksRef = useRef<CloudTrack[]>([]);
   const currentRef = useRef<string | undefined>(undefined);
@@ -280,8 +303,8 @@ function useMusicState() {
     const createPlayer = () => {
       if (!window.YT?.Player || ytPlayer.current || !document.getElementById('votefy-yt-player')) return;
       ytPlayer.current = new window.YT.Player('votefy-yt-player', {
-        height: '124',
-        width: '220',
+        height: '200',
+        width: '200',
         playerVars: {
           autoplay: 1,
           controls: 1,
@@ -321,7 +344,60 @@ function useMusicState() {
         document.body.appendChild(tag);
       }
     }
+
+    window.onSpotifyIframeApiReady = api => {
+      spotifyApi.current = api;
+      const pendingUri = pendingSpotifyUri.current;
+      if (pendingUri) {
+        const element = document.getElementById('votefy-spotify-player');
+        if (element && !spotifyController.current) createSpotifyController(api, element, pendingUri);
+      }
+    };
+    if (!document.querySelector('script[src="https://open.spotify.com/embed/iframe-api/v1"]')) {
+      const tag = document.createElement('script');
+      tag.src = 'https://open.spotify.com/embed/iframe-api/v1';
+      tag.async = true;
+      document.body.appendChild(tag);
+    }
   }, []);
+
+  function createSpotifyController(api: SpotifyIframeApi, element: HTMLElement, uri: string) {
+    api.createController(element, { uri, width: '100%', height: '152' }, controller => {
+      spotifyController.current = controller;
+      spotifyLoadedUri.current = uri;
+      controller.addListener('playback_update', event => {
+        if (typeof event.data.isPaused === 'boolean') setPlaying(!event.data.isPaused);
+        if (typeof event.data.position === 'number') setElapsed(event.data.position / 1000);
+        if (typeof event.data.duration === 'number') setDuration(event.data.duration / 1000);
+        if (event.data.duration && typeof event.data.position === 'number' && event.data.position >= event.data.duration - 500 && spotifyEndedUri.current !== spotifyLoadedUri.current) {
+          spotifyEndedUri.current = spotifyLoadedUri.current;
+          onEndedRef.current();
+        }
+      });
+      if (pendingSpotifyPlay.current) {
+        pendingSpotifyPlay.current = false;
+        controller.play();
+      }
+    });
+  }
+
+  function playSpotifyTrack(uri: string) {
+    pendingSpotifyUri.current = uri;
+    spotifyEndedUri.current = null;
+    pendingSpotifyPlay.current = true;
+    if (!spotifyController.current) {
+      const element = document.getElementById('votefy-spotify-player');
+      if (element && spotifyApi.current) createSpotifyController(spotifyApi.current, element, uri);
+      else setNotice('Carregando o player do Spotify… tente reproduzir novamente em instantes.');
+      return;
+    }
+    if (spotifyLoadedUri.current !== uri) {
+      spotifyController.current.loadUri(uri);
+      spotifyLoadedUri.current = uri;
+    }
+    spotifyController.current.play();
+    pendingSpotifyPlay.current = false;
+  }
 
   useEffect(() => {
     const activeTrack = tracks.find(t => t.id === current);
@@ -432,19 +508,27 @@ function useMusicState() {
 
     if (track.youtubeId) {
       audio.current?.pause();
+      spotifyController.current?.pause();
       if (ytPlayer.current && ytReady.current) {
         ytPlayer.current.loadVideoById(track.youtubeId);
       } else {
         pendingYtId.current = track.youtubeId;
       }
       setPlaying(true);
-    } else if (audio.current) {
+    } else if (track.spotifyUri) {
+      audio.current?.pause();
       if (ytPlayer.current && ytReady.current) {
         try {
           ytPlayer.current.pauseVideo();
         } catch {
           /* ignore */
         }
+      }
+      playSpotifyTrack(track.spotifyUri);
+    } else if (audio.current) {
+      spotifyController.current?.pause();
+      if (ytPlayer.current && ytReady.current) {
+        try { ytPlayer.current.pauseVideo(); } catch { /* ignore */ }
       }
       audio.current.src = track.mediaUrl;
       audio.current.play().catch(error => {
@@ -510,6 +594,10 @@ function useMusicState() {
       if (activeTrack?.youtubeId && ytPlayer.current && ytReady.current) {
         ytPlayer.current.seekTo(0, true);
         ytPlayer.current.playVideo();
+      } else if (activeTrack?.spotifyUri && spotifyController.current) {
+        spotifyEndedUri.current = null;
+        spotifyController.current.seek(0);
+        spotifyController.current.play();
       } else if (audio.current) {
         audio.current.currentTime = 0;
         void audio.current.play();
@@ -547,6 +635,11 @@ function useMusicState() {
       else ytPlayer.current.playVideo();
       return;
     }
+    if (activeTrack.spotifyUri && spotifyController.current) {
+      if (playing) spotifyController.current.pause();
+      else spotifyController.current.play();
+      return;
+    }
     if (!audio.current) return;
     if (playing) audio.current.pause();
     else audio.current.play().catch(() => setNotice('Não foi possível reproduzir este link.'));
@@ -556,6 +649,11 @@ function useMusicState() {
     const activeTrack = tracksRef.current.find(t => t.id === currentRef.current);
     if (activeTrack?.youtubeId && ytPlayer.current && ytReady.current) {
       ytPlayer.current.seekTo(value, true);
+      setElapsed(value);
+      return;
+    }
+    if (activeTrack?.spotifyUri && spotifyController.current) {
+      spotifyController.current.seek(value * 1000);
       setElapsed(value);
       return;
     }

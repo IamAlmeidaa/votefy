@@ -141,13 +141,9 @@ export function MusicShell({ children }: { children: ReactNode }) {
 
       {children}
 
-      {/* Container do player YouTube para streaming direto sem baixar MP3 */}
-      <div
-        className={`fixed bottom-24 right-4 z-40 overflow-hidden rounded-xl border border-border bg-card shadow-2xl transition-opacity duration-200 ${
-          track?.youtubeId ? 'opacity-100 pointer-events-auto' : 'opacity-0 pointer-events-none w-0 h-0'
-        }`}
-      >
-        <div id="votefy-yt-player" />
+      <div aria-hidden="true" className="yt-audio-host"><div id="votefy-yt-player" /></div>
+      <div className={`spotify-embed-host ${track?.spotifyUri ? 'spotify-embed-active' : ''}`} aria-label={track?.spotifyUri ? 'Player Spotify' : undefined}>
+        <div id="votefy-spotify-player" />
       </div>
 
       <footer className="player">
@@ -214,7 +210,8 @@ export function MusicShell({ children }: { children: ReactNode }) {
           </div>
         </div>
 
-        <div className="volume-control">
+        <div className={`volume-control ${track?.spotifyUri ? 'spotify-volume' : ''}`}>
+          {track?.spotifyUri && <span className="spotify-volume-note">Volume pelo player Spotify</span>}
           <IconButton label="Fila de reprodução" onClick={() => setQueueOpen(true)}><ListMusic/></IconButton>
           <IconButton label={m.volume ? 'Silenciar' : 'Ativar som'} onClick={() => m.setVolume(m.volume ? 0 : .7)}>
             {m.volume ? <Volume2/> : <VolumeX/>}
@@ -238,14 +235,15 @@ export function MusicShell({ children }: { children: ReactNode }) {
         <DialogContent>
           <DialogTitle>Adicionar música à comunidade</DialogTitle>
           <DialogDescription>
-            Cole um link do YouTube ou URL direta de áudio. A música ficará salva para todos ouvirem sem baixar MP3.
+            Adicione um link do YouTube, Spotify ou um endereço direto de áudio compatível.
           </DialogDescription>
+          <p className="text-xs text-muted-foreground">Links do Spotify usam o player oficial. Links de outros serviços devem apontar diretamente para um arquivo ou stream de áudio.</p>
           <form className="dialog-form" onSubmit={handleSaveLink}>
             <label>
-              Link da música (YouTube ou Áudio)
+              Link da música (YouTube, Spotify ou áudio)
               <Input
                 type="url"
-                placeholder="https://www.youtube.com/watch?v=..."
+                placeholder="https://open.spotify.com/track/..."
                 aria-label="Link da música"
                 required
                 value={mediaUrl}
@@ -309,7 +307,7 @@ function ImportButton({ label = 'Adicionar música', variant = 'default' }: { la
   );
 }
 
-function Empty({ title = 'A biblioteca da comunidade está vazia', description = 'Adicione um link do YouTube ou de áudio para todo mundo ouvir.' }: { title?: string; description?: string | undefined }) {
+function Empty({ title = 'A biblioteca da comunidade está vazia', description = 'Adicione um link do YouTube, Spotify ou áudio direto para todo mundo ouvir.' }: { title?: string; description?: string | undefined }) {
   return (
     <div className="empty-state">
       <Headphones/>
@@ -371,7 +369,7 @@ export function HomePage() {
         <div className="hero-copy">
           <span className="eyebrow"><Music2 size={12}/> SEM BAIXAR MP3 · 100% ONLINE</span>
           <h2>Votefy.<br/>A música é nossa.</h2>
-          <p>Cole um link do YouTube ou de áudio.<br/>Fica salvo no banco para todos ouvirem agora.</p>
+              <p>Cole um link do YouTube, Spotify ou áudio direto.<br/>Fica salvo no banco para todos ouvirem agora.</p>
           <ImportButton label="Adicionar música por link"/>
         </div>
       </section>
@@ -387,7 +385,7 @@ export function HomePage() {
             <Link2 size={27}/>
             <div>
               <strong className="text-sm">Seja o primeiro a adicionar uma música</strong>
-              <p>Cole um link do YouTube ou stream direto de áudio.</p>
+              <p>Cole um link do YouTube, Spotify ou stream direto de áudio.</p>
             </div>
             <Button
               variant="ghost"
@@ -487,7 +485,7 @@ export function TrackTable({ tracks, playlistId }: { tracks: CloudTrack[]; playl
                 </div>
               </td>
               <td className="hide-mobile text-muted-foreground">{t.votes}</td>
-              <td className="hide-mobile text-muted-foreground">{t.youtubeId ? 'YouTube Stream' : 'Áudio Stream'}</td>
+              <td className="hide-mobile text-muted-foreground">{t.youtubeId ? 'YouTube' : t.spotifyUri ? 'Spotify' : 'Áudio / stream'}</td>
               <td>
                 <div className="track-actions">
                   <IconButton label={`Tocar ${t.title}`} onClick={() => m.play(t.id, tracks.map(item => item.id))}><Play/></IconButton>
