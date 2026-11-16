@@ -37,10 +37,29 @@ export interface ButtonProps
 }
 
 const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
-  ({ className, variant, size, asChild = false, ...props }, ref) => {
+  ({ className, variant, size, asChild = false, onPointerMove, onWheel, ...props }, ref) => {
     const Comp = asChild ? Slot : "button";
+    const wheelTimer = React.useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
     return (
-      <Comp data-variant={variant ?? 'default'} className={cn(buttonVariants({ variant, size, className }))} ref={ref} {...props} />
+      <Comp
+        data-variant={variant ?? 'default'}
+        className={cn(buttonVariants({ variant, size, className }))}
+        ref={ref}
+        onPointerMove={event => {
+          const bounds = event.currentTarget.getBoundingClientRect();
+          event.currentTarget.style.setProperty('--glass-x', `${event.clientX - bounds.left}px`);
+          event.currentTarget.style.setProperty('--glass-y', `${event.clientY - bounds.top}px`);
+          onPointerMove?.(event);
+        }}
+        onWheel={event => {
+          const target = event.currentTarget;
+          target.dataset.glassScroll = 'true';
+          if (wheelTimer.current) clearTimeout(wheelTimer.current);
+          wheelTimer.current = setTimeout(() => { delete target.dataset.glassScroll; }, 360);
+          onWheel?.(event);
+        }}
+        {...props}
+      />
     );
   },
 );

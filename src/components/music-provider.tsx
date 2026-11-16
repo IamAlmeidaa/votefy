@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
+import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
 import { type Track, type Playlist, type Room } from '@/lib/music';
 
 export type Membership = {
@@ -28,14 +28,14 @@ export type CurrentUser = {
   username: string;
 };
 
-export type AccentTheme = 'red' | 'green' | 'blue' | 'white' | 'pink' | 'purple' | 'orange';
-const accentThemes: AccentTheme[] = ['red', 'green', 'blue', 'white', 'pink', 'purple', 'orange'];
-function getInitialAccent(): AccentTheme {
+function getInitialAccent(): string {
   if (typeof window === 'undefined') return 'red';
   try {
-    const saved = localStorage.getItem('votefy_accent') as AccentTheme | null;
-    return saved && accentThemes.includes(saved) ? saved : 'red';
-  } catch { return 'red'; }
+    const saved = localStorage.getItem('votefy_accent');
+    if (saved && /^#[\da-f]{6}$/i.test(saved)) return saved;
+    const previousThemes: Record<string, string> = { red: '#f04452', green: '#31c48d', blue: '#4b8dff', white: '#e8edf5', pink: '#f06db6', purple: '#a78bfa', orange: '#f39b42' };
+    return saved ? previousThemes[saved] || '#f04452' : '#f04452';
+  } catch { return '#f04452'; }
 }
 
 interface ApiSongRecord {
@@ -130,7 +130,7 @@ function mapSongToTrack(song: ApiSongRecord): CloudTrack {
 
 function useMusicState() {
   const [currentUser, setCurrentUser] = useState<CurrentUser | null>(null);
-  const [accentTheme, setAccentThemeState] = useState<AccentTheme>(getInitialAccent);
+  const [accentColor, setAccentColorState] = useState<string>(getInitialAccent);
   const [userId, setUserId] = useState<string>(() => getOrCreateClientUserId());
   const [tracks, setTracks] = useState<CloudTrack[]>([]);
   const [playlists, setPlaylists] = useState<Playlist[]>([]);
@@ -171,16 +171,19 @@ function useMusicState() {
   const userIdRef = useRef<string>(userId);
   const onEndedRef = useRef<() => void>(() => {});
 
-  const setAccentTheme = (theme: AccentTheme) => {
-    if (!accentThemes.includes(theme)) return;
-    setAccentThemeState(theme);
-    try { localStorage.setItem('votefy_accent', theme); } catch { /* Theme can still be changed for this session. */ }
-    document.documentElement.dataset.accent = theme;
-  };
+  const setAccentColor = useCallback((color: string) => {
+    if (!/^#[\da-f]{6}$/i.test(color)) return;
+    setAccentColorState(color.toLowerCase());
+    try { localStorage.setItem('votefy_accent', color.toLowerCase()); } catch { /* Theme can still be changed for this session. */ }
+    const channels = [1, 3, 5].map(offset => parseInt(color.slice(offset, offset + 2), 16));
+    document.documentElement.style.setProperty('--primary', `rgb(${channels.join(' ')})`);
+    const luminance = channels.map(channel => channel / 255).map(channel => channel <= .04045 ? channel / 12.92 : ((channel + .055) / 1.055) ** 2.4).reduce((sum, channel, index) => sum + channel * [0.2126, 0.7152, 0.0722][index]!, 0);
+    document.documentElement.style.setProperty('--primary-foreground', luminance > .48 ? 'oklch(.18 .02 250)' : 'white');
+  }, []);
 
   useEffect(() => {
-    document.documentElement.dataset.accent = accentTheme;
-  }, [accentTheme]);
+    setAccentColor(accentColor);
+  }, [accentColor, setAccentColor]);
 
   currentRef.current = current;
   volumeRef.current = volume;
@@ -893,8 +896,8 @@ function useMusicState() {
   return {
     userId,
     currentUser,
-    accentTheme,
-    setAccentTheme,
+    accentColor,
+    setAccentColor,
     login,
     register,
     logout,

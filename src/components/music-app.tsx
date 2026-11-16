@@ -1,14 +1,13 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import { Link, useNavigate, useRouterState } from '@tanstack/react-router';
-import { Home, Search, Library, Heart, ListMusic, Radio, Plus, Link2, ChevronLeft, ChevronRight, Play, Pause, SkipBack, SkipForward, Shuffle, Repeat, Volume2, VolumeX, Music2, ArrowUpRight, MoreHorizontal, Menu, X, Trash2, Send, Users, Check, Headphones, Globe, Clock, LogOut, ThumbsUp, UserRound } from 'lucide-react';
+import { Home, Search, Library, Heart, ListMusic, Radio, Plus, Link2, ChevronLeft, ChevronRight, Play, Pause, SkipBack, SkipForward, Shuffle, Repeat, Volume2, VolumeX, Music2, ArrowUpRight, MoreHorizontal, Menu, X, Trash2, Send, Users, Check, Headphones, Globe, Clock, LogOut, ThumbsUp, UserRound, ShieldCheck } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Dialog, DialogContent, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { useMusic, type CloudTrack } from './music-provider';
-import type { AccentTheme } from './music-provider';
 import { Artwork } from './artwork';
 import { candidates, vote, time, type Room } from '@/lib/music';
-import { AuthButton, EntryPage } from '@/components/auth-modal';
+import { AuthButton, AuthForm } from '@/components/auth-modal';
 import hero from '@/assets/music-cover.jpg';
 
 export function IconButton({ label, children, onClick, active, disabled, className = '' }: { label: string; children: ReactNode; onClick?: () => void; active?: boolean; disabled?: boolean; className?: string }) {
@@ -30,6 +29,27 @@ function TrackCover({ track, index = 0 }: { track: CloudTrack; index?: number })
   return <Artwork cover={track.cover} art={index} />;
 }
 
+function parseAccentColor(value: string): string | null {
+  const color = value.trim();
+  const hex = color.match(/^#?([\da-f]{3}|[\da-f]{6})$/i);
+  if (hex) {
+    const raw = hex[1]!.length === 3 ? [...hex[1]!].map(char => char + char).join('') : hex[1]!;
+    return `#${raw.toLowerCase()}`;
+  }
+  const rgb = color.match(/^rgb\(\s*(\d{1,3})\s*,\s*(\d{1,3})\s*,\s*(\d{1,3})\s*\)$/i)
+    ?? color.match(/^(\d{1,3})\s*,\s*(\d{1,3})\s*,\s*(\d{1,3})$/);
+  if (!rgb) return null;
+  const channels = rgb.slice(1, 4).map(Number);
+  if (channels.some(channel => channel < 0 || channel > 255)) return null;
+  return `#${channels.map(channel => channel.toString(16).padStart(2, '0')).join('')}`;
+}
+
+function hexToRgb(value: string): string {
+  const hex = parseAccentColor(value) || '#f04452';
+  const channels = hex.slice(1).match(/.{2}/g)!.map(channel => parseInt(channel, 16));
+  return channels.join(', ');
+}
+
 export function MusicShell({ children }: { children: ReactNode }) {
   const m = useMusic();
   const nav = useNavigate();
@@ -40,18 +60,29 @@ export function MusicShell({ children }: { children: ReactNode }) {
   const [addOpen, setAddOpen] = useState(false);
   const [mediaUrl, setMediaUrl] = useState('');
   const [customTitle, setCustomTitle] = useState('');
-  const accents: { id: AccentTheme; label: string; color: string }[] = [
-    { id: 'red', label: 'Vermelho', color: '#f04452' },
-    { id: 'green', label: 'Verde', color: '#31c48d' },
-    { id: 'blue', label: 'Azul', color: '#4b8dff' },
-    { id: 'white', label: 'Branco', color: '#e8edf5' },
-    { id: 'pink', label: 'Rosa', color: '#f06db6' },
-    { id: 'purple', label: 'Roxo', color: '#a78bfa' },
-    { id: 'orange', label: 'Laranja', color: '#f39b42' },
-  ];
+  const [accentHex, setAccentHex] = useState(m.accentColor);
+  const [accentRgb, setAccentRgb] = useState(() => hexToRgb(m.accentColor));
+  useEffect(() => { setAccentHex(m.accentColor); setAccentRgb(hexToRgb(m.accentColor)); }, [m.accentColor]);
+  const updateAccent = (value: string) => {
+    const hex = parseAccentColor(value);
+    if (!hex) return false;
+    m.setAccentColor(hex);
+    return true;
+  };
   if (path === '/') {
-    if (!m.ready || !m.currentUser) return <EntryPage />;
-    return <div className="app-shell">{children}</div>;
+    if (!m.ready || !m.currentUser) {
+      return (
+        <main className="auth-page">
+          <div className="auth-page-top"><span /><Link className="auth-brand" to="/" aria-label="Votefy início"><span className="brand-mark" aria-hidden="true"><i /><i /><i /><i /></span>Votefy</Link></div>
+          <section className="auth-card" aria-labelledby="auth-title">
+            <div className="auth-card-heading"><span className="auth-icon"><Radio size={21} /></span><span className="eyebrow">Sua comunidade musical</span><h1 id="auth-title">Sua música. Sua conta.</h1><p>Entre para votar, criar salas e curtir música junto com todo mundo.</p></div>
+            {!m.ready ? <div className="auth-loading" role="status">Carregando sua conta…</div> : <AuthForm />}
+            <p className="auth-privacy"><ShieldCheck size={14} /> Acesso protegido em conexão segura</p>
+          </section>
+          <p className="auth-footer">Votefy <span>·</span> Música é melhor quando compartilhada.</p>
+        </main>
+      );
+    }
   }
 
   const track = m.tracks.find(t => t.id === m.current);
@@ -142,20 +173,10 @@ export function MusicShell({ children }: { children: ReactNode }) {
         </div>
         <div className="topbar-right">
           <span className="local-badge"><span className="status-dot"/>Sincronizado</span>
-          <div className="accent-picker" role="group" aria-label="Cor do site">
-            <span className="accent-label">Cor</span>
-            {accents.map(accent => (
-              <button
-                key={accent.id}
-                type="button"
-                className={`accent-swatch ${m.accentTheme === accent.id ? 'active' : ''}`}
-                style={{ '--swatch-color': accent.color } as React.CSSProperties}
-                title={accent.label}
-                aria-label={`Usar tema ${accent.label.toLowerCase()}`}
-                aria-pressed={m.accentTheme === accent.id}
-                onClick={() => m.setAccentTheme(accent.id)}
-              />
-            ))}
+          <div className="accent-picker" role="group" aria-label="Personalizar cor do site">
+            <label className="color-wheel-label" title="Escolher cor"><input aria-label="Roda de cores" type="color" value={m.accentColor} onChange={event => updateAccent(event.target.value)} /></label>
+            <label className="accent-input-label"><span>HEX</span><input aria-label="Código hexadecimal da cor" value={accentHex} maxLength={7} spellCheck={false} onChange={event => { setAccentHex(event.target.value); if (updateAccent(event.target.value)) setAccentRgb(hexToRgb(event.target.value)); }} onBlur={() => { const hex = parseAccentColor(accentHex); if (hex) setAccentHex(hex); else setAccentHex(m.accentColor); }} /></label>
+            <label className="accent-input-label rgb-input"><span>RGB</span><input aria-label="Valores RGB da cor" value={accentRgb} spellCheck={false} onChange={event => { setAccentRgb(event.target.value); updateAccent(event.target.value); }} onBlur={() => { const hex = parseAccentColor(accentRgb); if (hex) { setAccentHex(hex); setAccentRgb(hexToRgb(hex)); } else setAccentRgb(hexToRgb(m.accentColor)); }} /></label>
           </div>
           <Button variant="outline" className="upload-top" size="sm" onClick={() => setAddOpen(true)}>
             <Link2/>Adicionar link
