@@ -1,18 +1,16 @@
-# Onda — execução local
+# Execução do Votefy
 
-Esta versão é um projeto React/TanStack Start porque essa é a estrutura exigida pelo Lovable. Não é uma entrega em três arquivos HTML/CSS/JavaScript puros, e a extensão Live Server não executa este projeto.
+## Desenvolvimento local
 
-## Executar no Visual Studio Code
-1. Exporte o código do projeto pelo Lovable e abra a pasta no Visual Studio Code.
-2. Instale Bun (https://bun.sh) no computador.
-3. Abra o terminal integrado e execute `bun install`.
-4. Execute `bun run dev` e abra o endereço informado no terminal.
+Instale Bun ou Node.js. Na pasta do projeto, execute:
 
-## Dados locais
-Importe seus arquivos pelo botão Adicionar músicas ou arraste-os para a janela. Os arquivos e capas ficam no IndexedDB deste navegador. Playlists, favoritos, salas e preferências ficam no armazenamento local. Limpar dados do site remove a coleção. Outro navegador ou endereço não terá a mesma biblioteca. Formatos e codecs dependem do suporte do navegador.
+```sh
+bun install
+bun run dev
+```
 
-As salas não conectam pessoas pela internet: os participantes são fictícios e a troca do participante ativo simula os votos. O administrador controla a rodada. Sem votos ou em empate a escolha é aleatória; com menos de quatro músicas restantes a rodada usa todas elas.
+Configure `DATABASE_URL` no ambiente local para ativar cadastro, login, perfis e os recursos conectados ao Neon.
 
-Após a página e os recursos necessários terem sido carregados, a reprodução dos arquivos importados funciona sem conexão. Não há instalação offline nem garantia de reabrir/recarregar o site sem conexão nesta versão.
+## Publicação
 
-As imagens de capa sem metadados são ilustrações, não álbuns ou músicas de um serviço de streaming. Nenhuma faixa fictícia é adicionada à biblioteca.
+O projeto é publicado pela Vercel a partir do repositório GitHub. Um push para `main` inicia o deploy de produção. Configure `DATABASE_URL` em **Vercel → Project Settings → Environment Variables** para os ambientes necessários.

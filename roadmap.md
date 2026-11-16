@@ -1,7 +1,9 @@
-# Onda
-- [x] Biblioteca local com importação, metadados, pesquisa e favoritos.
-- [x] Player persistente entre páginas e playlists locais.
-- [x] Salas simuladas, votação, administração, fila, histórico e chat.
-- [x] Interface desktop/mobile, 15 testes e verificação com arquivos WAV reais.
-- [x] Documentar execução e limitações: React exigido pelo Lovable; sem entrega em três arquivos puros nem instalação offline.
+# Votefy
+
+- [x] Biblioteca de músicas com pesquisa, metadados e favoritos.
+- [x] Player persistente entre páginas e playlists.
+- [x] Salas, votação, administração, fila, histórico e chat.
+- [x] Interface responsiva para desktop e celular.
+- [x] Login, perfis, missões, Deesi Coins e decorações.
+- [x] Deploy de produção pela Vercel conectado ao GitHub.
 - [ ] Definir e implementar salas LAN reais para compartilhar a biblioteca do host na rede local.

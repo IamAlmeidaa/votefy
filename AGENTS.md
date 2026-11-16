@@ -1,35 +1,7 @@
-<!-- LOVABLE:BEGIN -->
-> [!IMPORTANT]
-> This project is connected to [Lovable](https://lovable.dev). Avoid rewriting
-> published git history — force pushing, or rebasing/amending/squashing commits
-> that are already pushed — as it rewrites history on Lovable's side and the
-> user will likely lose their project history.
->
-> Commits you push to the connected branch sync back to Lovable and show up in
-> the editor, so keep the branch in a working state.
+# Project instructions
 
-## What Lovable manages
-
-Rules outside this block are the project's own. Change the pieces below in
-Lovable, not by hand. With the [Lovable MCP](https://mcp.lovable.dev)
-connected, `send_message` asks Lovable to do it; otherwise ask the user to
-use the editor.
-
-- **Database.** Do not add or edit `supabase/migrations/` or `drizzle/`.
-  Ask Lovable to change the schema.
-- **Generated files.** Do not edit a file whose header says it is automatically
-  generated.
-- **AI gateway.** Keep model calls on Lovable's gateway, and keep
-  `LOVABLE_API_KEY` out of browser code.
-- **Connectors.** Lovable provides native connectors. `list_connectors` shows
-  which are enabled; `add_connector` only returns the dashboard link. When a
-  connector is enabled, calls go through the connector gateway and need
-  `LOVABLE_API_KEY`. When Lovable does not provide one, users can bring their
-  own key and store it in Secrets.
-- **Secrets.** Lovable manages them. Do not put secret values in the repo.
-<!-- LOVABLE:END -->
-
-## Application architecture
-- Keep the music state and HTML Audio instance in a root-level React provider so playback survives route navigation.
-- Store imported blobs and metadata in IndexedDB, and lightweight user state in localStorage; this application intentionally has no backend.
-- Put pure voting rules in a shared browser-safe module and test them independently to preserve local simulation integrity.
+- This app uses React, TanStack Start, and Vite. Keep the root music provider mounted so playback survives route navigation.
+- Neon Postgres is accessed from server-only modules. Read `DATABASE_URL` from the server environment and never expose it through client-side `VITE_` variables.
+- Vercel is the production deployment target. The repository is connected to Vercel through GitHub; pushes to `main` trigger production deployments.
+- Do not hand-edit generated route-tree files.
+- Keep personal media uploads scoped to the authenticated account and validate file type and size on the server.
