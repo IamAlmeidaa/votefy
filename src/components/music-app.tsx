@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Dialog, DialogContent, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { useMusic, type CloudTrack } from './music-provider';
+import type { AccentTheme } from './music-provider';
 import { Artwork } from './artwork';
 import { candidates, vote, time, type Room } from '@/lib/music';
 import { AuthButton, EntryPage } from '@/components/auth-modal';
@@ -33,16 +34,25 @@ export function MusicShell({ children }: { children: ReactNode }) {
   const m = useMusic();
   const nav = useNavigate();
   const path = useRouterState({ select: s => s.location.pathname });
-  if (path === '/') {
-    if (!m.ready || !m.currentUser) return <EntryPage />;
-    return <div className="app-shell">{children}</div>;
-  }
   const [mobile, setMobile] = useState(false);
   const [query, setQuery] = useState('');
   const [queueOpen, setQueueOpen] = useState(false);
   const [addOpen, setAddOpen] = useState(false);
   const [mediaUrl, setMediaUrl] = useState('');
   const [customTitle, setCustomTitle] = useState('');
+  const accents: { id: AccentTheme; label: string; color: string }[] = [
+    { id: 'red', label: 'Vermelho', color: '#f04452' },
+    { id: 'green', label: 'Verde', color: '#31c48d' },
+    { id: 'blue', label: 'Azul', color: '#4b8dff' },
+    { id: 'white', label: 'Branco', color: '#e8edf5' },
+    { id: 'pink', label: 'Rosa', color: '#f06db6' },
+    { id: 'purple', label: 'Roxo', color: '#a78bfa' },
+    { id: 'orange', label: 'Laranja', color: '#f39b42' },
+  ];
+  if (path === '/') {
+    if (!m.ready || !m.currentUser) return <EntryPage />;
+    return <div className="app-shell">{children}</div>;
+  }
 
   const track = m.tracks.find(t => t.id === m.current);
   const items = [
@@ -132,6 +142,21 @@ export function MusicShell({ children }: { children: ReactNode }) {
         </div>
         <div className="topbar-right">
           <span className="local-badge"><span className="status-dot"/>Sincronizado</span>
+          <div className="accent-picker" role="group" aria-label="Cor do site">
+            <span className="accent-label">Cor</span>
+            {accents.map(accent => (
+              <button
+                key={accent.id}
+                type="button"
+                className={`accent-swatch ${m.accentTheme === accent.id ? 'active' : ''}`}
+                style={{ '--swatch-color': accent.color } as React.CSSProperties}
+                title={accent.label}
+                aria-label={`Usar tema ${accent.label.toLowerCase()}`}
+                aria-pressed={m.accentTheme === accent.id}
+                onClick={() => m.setAccentTheme(accent.id)}
+              />
+            ))}
+          </div>
           <Button variant="outline" className="upload-top" size="sm" onClick={() => setAddOpen(true)}>
             <Link2/>Adicionar link
           </Button>

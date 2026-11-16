@@ -28,6 +28,16 @@ export type CurrentUser = {
   username: string;
 };
 
+export type AccentTheme = 'red' | 'green' | 'blue' | 'white' | 'pink' | 'purple' | 'orange';
+const accentThemes: AccentTheme[] = ['red', 'green', 'blue', 'white', 'pink', 'purple', 'orange'];
+function getInitialAccent(): AccentTheme {
+  if (typeof window === 'undefined') return 'red';
+  try {
+    const saved = localStorage.getItem('votefy_accent') as AccentTheme | null;
+    return saved && accentThemes.includes(saved) ? saved : 'red';
+  } catch { return 'red'; }
+}
+
 interface ApiSongRecord {
   id: number | string;
   title: string;
@@ -120,6 +130,7 @@ function mapSongToTrack(song: ApiSongRecord): CloudTrack {
 
 function useMusicState() {
   const [currentUser, setCurrentUser] = useState<CurrentUser | null>(null);
+  const [accentTheme, setAccentThemeState] = useState<AccentTheme>(getInitialAccent);
   const [userId, setUserId] = useState<string>(() => getOrCreateClientUserId());
   const [tracks, setTracks] = useState<CloudTrack[]>([]);
   const [playlists, setPlaylists] = useState<Playlist[]>([]);
@@ -159,6 +170,17 @@ function useMusicState() {
   const activeRoomRef = useRef<string | undefined>(undefined);
   const userIdRef = useRef<string>(userId);
   const onEndedRef = useRef<() => void>(() => {});
+
+  const setAccentTheme = (theme: AccentTheme) => {
+    if (!accentThemes.includes(theme)) return;
+    setAccentThemeState(theme);
+    try { localStorage.setItem('votefy_accent', theme); } catch { /* Theme can still be changed for this session. */ }
+    document.documentElement.dataset.accent = theme;
+  };
+
+  useEffect(() => {
+    document.documentElement.dataset.accent = accentTheme;
+  }, [accentTheme]);
 
   currentRef.current = current;
   volumeRef.current = volume;
@@ -871,6 +893,8 @@ function useMusicState() {
   return {
     userId,
     currentUser,
+    accentTheme,
+    setAccentTheme,
     login,
     register,
     logout,

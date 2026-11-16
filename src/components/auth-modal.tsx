@@ -101,10 +101,10 @@ export function AuthForm({
             aria-invalid={Boolean(error)}
             autoComplete={mode === 'login' ? 'current-password' : 'new-password'}
             maxLength={128}
-            minLength={mode === 'register' ? 10 : undefined}
+            minLength={mode === 'register' ? 5 : undefined}
             name="password"
             onChange={event => setPassword(event.target.value)}
-            placeholder={mode === 'register' ? 'Use pelo menos 10 caracteres' : 'Sua senha'}
+            placeholder={mode === 'register' ? 'Use pelo menos 5 caracteres' : 'Sua senha'}
             required
             type="password"
             value={password}

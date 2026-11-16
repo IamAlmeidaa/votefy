@@ -930,8 +930,8 @@ export async function registerUser(
   if (!password) {
     throw new Error("Informe uma senha.");
   }
-  if (password.length < 10 || password.length > 128) {
-    throw new Error("A senha deve ter entre 10 e 128 caracteres.");
+  if (password.length < 5 || password.length > 128) {
+    throw new Error("A senha deve ter entre 5 e 128 caracteres.");
   }
   if (cleanUsername.length > 32 || !/^[\p{L}\p{N}_.-]+$/u.test(cleanUsername)) {
     throw new Error("Use até 32 letras, números, ponto, hífen ou sublinhado no usuário.");
