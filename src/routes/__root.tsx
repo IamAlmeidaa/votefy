@@ -83,10 +83,10 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
     meta: [
       { charSet: "utf-8" },
       { name: "viewport", content: "width=device-width, initial-scale=1" },
-      { title: "Onda — Música local" },
+      { title: "Votefy — Música local" },
       { name: "description", content: "Um player pessoal de músicas locais com playlists e salas simuladas." },
-      { name: "author", content: "Onda" },
-      { property: "og:title", content: "Onda — Música local" },
+      { name: "author", content: "Votefy" },
+      { property: "og:title", content: "Votefy — Música local" },
       { property: "og:description", content: "Sua música, perto de você." },
       { property: "og:type", content: "website" },
       { name: "twitter:card", content: "summary_large_image" },
